@@ -1,0 +1,11 @@
+Checks: >
+  clang-analyzer-*,
+  performance-*,
+  portability-*,
+  modernize-*,
+  -modernize-use-trailing-return-type,
+  -modernize-use-auto
+
+WarningsAsErrors: ''
+HeaderFilterRegex: '.*'
+FormatStyle: none
