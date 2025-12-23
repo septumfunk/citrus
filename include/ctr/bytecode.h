@@ -129,11 +129,15 @@ EXPORT ctr_proto ctr_proto_new(void);
 EXPORT void ctr_proto_free(ctr_proto *proto);
 
 typedef sf_str ctr_dstr;
+
+struct ctr_dobj;
+void _ctr_dobj_cleanup(struct ctr_dobj *obj);
 #define MAP_NAME ctr_dobj
 #define MAP_K sf_str
 #define MAP_V ctr_val
 #define EQUAL_FN(s1, s2) (sf_str_eq(s1, s2))
 #define HASH_FN(s) (sf_str_hash(s))
+#define CLEANUP_FN _ctr_dobj_cleanup
 #include <sf/containers/map.h>
 typedef ctr_proto *ctr_dfun;
 

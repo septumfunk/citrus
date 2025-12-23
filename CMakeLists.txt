@@ -9,6 +9,7 @@ set(LIBRARY_TYPE STATIC)
 project(citrus C)
 add_library(${PROJECT_NAME} ${LIBRARY_TYPE}
     src/bytecode.c
+    src/syntax.c
     src/vm.c
 )
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

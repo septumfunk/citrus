@@ -21,6 +21,11 @@
 #define HASH_FN sf_str_hash
 #include <sf/containers/map.h>
 
+void _dobj_foreach(void *_u, sf_str k, ctr_val _v) { (void)_u;(void)_v; sf_str_free(k); }
+void _ctr_dobj_cleanup(ctr_dobj *obj) {
+    ctr_dobj_foreach(obj, _dobj_foreach, NULL);
+}
+
 ctr_proto ctr_proto_new(void) {
     return (ctr_proto){
         .code = NULL,
