@@ -31,7 +31,7 @@ static inline bool ctr_scanpeek(ctr_scanner *s, char match) {
     return true;
 }
 
-static inline bool ctr_isnumber(char c) { return c >= '0' && c <= '9'; }
+static inline bool ctr_isnumber(char c) { return (c >= '0' && c <= '9') || c == '-'; }
 static inline bool ctr_isalphan(char c) { return (c >= 'A' && c <= 'Z')|| (c >= 'a' && c <= 'z') || c == '_' || ctr_isnumber(c); }
 
 ctr_token ctr_scanstr(ctr_scanner *s) {
@@ -144,7 +144,7 @@ ctr_scan_ex ctr_scan(sf_str src) {
         .cc = 0,
         .keywords = ctr_keywords_new(),
     };
-    enum ctr_scan_errt eval = CTR_ERR_UNEXPECTED_TOKEN;
+    enum ctr_scan_errt eval = CTR_ERRS_UNEXPECTED_TOKEN;
 
     ctr_keywords_set(&s.keywords, sf_lit("and"), TK_AND);
     ctr_keywords_set(&s.keywords, sf_lit("or"), TK_OR);
@@ -170,7 +170,6 @@ ctr_scan_ex ctr_scan(sf_str src) {
             ctr_scancase('}', TK_RIGHT_BRACE);
             ctr_scancase(',', TK_COMMA);
             ctr_scancase('.', TK_PERIOD);
-            ctr_scancase('-', TK_MINUS);
             ctr_scancase('+', TK_PLUS);
             ctr_scancase(';', TK_SEMICOLON);
             ctr_scancase('*', TK_ASTERISK);
@@ -210,7 +209,7 @@ ctr_scan_ex ctr_scan(sf_str src) {
             case '"': {
                 s.current = ctr_scanstr(&s);
                 if (s.current.tt != TK_STRING) {
-                    eval = CTR_ERR_UNTERMINATED_STR;
+                    eval = CTR_ERRS_UNTERMINATED_STR;
                     goto err;
                 }
                 ctr_tokenvec_push(&tks, s.current);
@@ -218,10 +217,15 @@ ctr_scan_ex ctr_scan(sf_str src) {
             }
 
             default:
+                if (c == '-' && (tks.top->tt == TK_IDENTIFIER || tks.top->tt == TK_NUMBER || tks.top->tt == TK_INTEGER)) {
+                    s.current.tt = TK_MINUS;
+                    ctr_tokenvec_push(&tks, s.current);
+                    continue;
+                }
                 if (ctr_isnumber(c)) { // Number
                     s.current = ctr_scannum(&s);
                     if (s.current.tt != TK_NUMBER && s.current.tt != TK_INTEGER) {
-                        eval = CTR_ERR_NUMBER_FORMAT;
+                        eval = CTR_ERRS_NUMBER_FORMAT;
                         goto err;
                     }
                     ctr_tokenvec_push(&tks, s.current);
@@ -258,47 +262,44 @@ typedef struct { ctr_token *tok; } ctr_parser;
 
 void ctr_node_free(ctr_node *tree) {
     switch (tree->tt) {
-        case ND_BINARY:
-            ctr_node_free(tree->statement.binary.left);
-            ctr_node_free(tree->statement.binary.right);
+        case CTR_ND_BINARY:
+            ctr_node_free(tree->inner.binary.left);
+            ctr_node_free(tree->inner.binary.right);
             break;
-        case ND_UNARY:
-            ctr_node_free(tree->statement.unary.expr);
+        case CTR_ND_RETURN:
+            ctr_node_free(tree->inner.stmt_ret);
             break;
-        case ND_RETURN:
-            ctr_node_free(tree->statement.stmt_ret.expr);
+        case CTR_ND_IDENTIFIER:
+        case CTR_ND_LITERAL:
+            ctr_ddel(tree->inner.identifier);
             break;
-        case ND_IDENTIFIER:
-        case ND_LITERAL:
-            ctr_ddel(tree->statement.identifier);
+        case CTR_ND_LET:
+            ctr_ddel(tree->inner.stmt_let.name);
+            ctr_node_free(tree->inner.stmt_let.value);
             break;
-        case ND_LET:
-            ctr_ddel(tree->statement.stmt_let.name);
-            ctr_node_free(tree->statement.stmt_let.value);
+        case CTR_ND_ASSIGN:
+            ctr_ddel(tree->inner.stmt_assign.name);
+            ctr_node_free(tree->inner.stmt_assign.value);
             break;
-        case ND_ASSIGN:
-            ctr_ddel(tree->statement.stmt_assign.name);
-            ctr_node_free(tree->statement.stmt_assign.value);
-            break;
-        case ND_CALL:
-            ctr_ddel(tree->statement.stmt_call.name);
-            if (tree->statement.stmt_call.args) {
-                for (size_t i = 0; i < tree->statement.stmt_call.arg_c; ++i)
-                    ctr_node_free(tree->statement.stmt_call.args[i]);
-                free(tree->statement.stmt_call.args);
+        case CTR_ND_CALL:
+            ctr_ddel(tree->inner.stmt_call.name);
+            if (tree->inner.stmt_call.args) {
+                for (size_t i = 0; i < tree->inner.stmt_call.arg_c; ++i)
+                    ctr_node_free(tree->inner.stmt_call.args[i]);
+                free(tree->inner.stmt_call.args);
             }
             break;
-        case ND_IF:
-            ctr_node_free(tree->statement.stmt_if.condition);
-            ctr_node_free(tree->statement.stmt_if.then_node);
-            if (tree->statement.stmt_if.else_node)
-                ctr_node_free(tree->statement.stmt_if.else_node);
+        case CTR_ND_IF:
+            ctr_node_free(tree->inner.stmt_if.condition);
+            ctr_node_free(tree->inner.stmt_if.then_node);
+            if (tree->inner.stmt_if.else_node)
+                ctr_node_free(tree->inner.stmt_if.else_node);
             break;
-        case ND_BLOCK:
-            if (tree->statement.block.stmts) {
-                for (size_t i = 0; i < tree->statement.block.count; ++i)
-                    ctr_node_free(tree->statement.block.stmts[i]);
-                free(tree->statement.block.stmts);
+        case CTR_ND_BLOCK:
+            if (tree->inner.block.stmts) {
+                for (size_t i = 0; i < tree->inner.block.count; ++i)
+                    ctr_node_free(tree->inner.block.stmts[i]);
+                free(tree->inner.block.stmts);
             }
             break;
     }
@@ -325,8 +326,10 @@ bool ctr_lassoc(ctr_tokentype tt) {
         default: return true;
     }
 }
-bool ctr_iscondition(ctr_tokentype tt) {
-    switch (tt) {
+bool ctr_niscondition(ctr_node *node) {
+    if (node->tt != CTR_ND_BINARY)
+        return false;
+    switch (node->inner.binary.tt) {
         case TK_OR: case TK_AND: case TK_DOUBLE_EQUAL: case TK_NOT_EQUAL:
         case TK_LESS: case TK_LESS_EQUAL: case TK_GREATER: case TK_GREATER_EQUAL:
             return true;
@@ -356,9 +359,9 @@ ctr_parse_ex ctr_parprim(ctr_parser *p) {
         case TK_INTEGER: case TK_NUMBER: case TK_STRING: case TK_TRUE: case TK_FALSE: case TK_NIL: {
             ctr_node *n = malloc(sizeof(ctr_node));
             *n = (ctr_node){
-                p->tok->tt == TK_IDENTIFIER ? ND_IDENTIFIER : ND_LITERAL,
+                p->tok->tt == TK_IDENTIFIER ? CTR_ND_IDENTIFIER : CTR_ND_LITERAL,
                 p->tok->line, p->tok->column,
-                .statement = (union ctr_statement){.literal = ctr_dref(p->tok->value)},
+                .inner = (union ctr_ninner){.literal = ctr_dref(p->tok->value)},
             };
             ++p->tok;
             return ctr_parse_ex_ok(n);
@@ -371,9 +374,9 @@ ctr_parse_ex ctr_parprim(ctr_parser *p) {
             } else { // Identifier
                 ctr_node *n = malloc(sizeof(ctr_node));
                 *n = (ctr_node){
-                    p->tok->tt == TK_IDENTIFIER ? ND_IDENTIFIER : ND_LITERAL,
+                    p->tok->tt == TK_IDENTIFIER ? CTR_ND_IDENTIFIER : CTR_ND_LITERAL,
                     p->tok->line, p->tok->column,
-                    .statement = (union ctr_statement){.identifier = ctr_dref(p->tok->value)},
+                    .inner = (union ctr_ninner){.identifier = ctr_dref(p->tok->value)},
                 };
                 ++p->tok;
                 return ctr_parse_ex_ok(n);
@@ -385,12 +388,12 @@ ctr_parse_ex ctr_parprim(ctr_parser *p) {
             ctr_parse_ex ex = ctr_parbin(p, 0);
             if (!ex.is_ok) return ex;
             if (p->tok->tt != TK_RIGHT_PAREN)
-                return ctr_parse_ex_err((ctr_parse_err){CTR_ERR_EXPECTED_RPAREN, p->tok->line, p->tok->column});
+                return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_RPAREN, p->tok->line, p->tok->column});
             ++p->tok;
             return ctr_parse_ex_ok(ex.value.ok);
         }
         default:
-            return ctr_parse_ex_err((ctr_parse_err){CTR_ERR_EXPECTED_EXPRESSION, p->tok->line, p->tok->column});
+            return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_EXPRESSION, p->tok->line, p->tok->column});
     }
 }
 
@@ -415,9 +418,9 @@ ctr_parse_ex ctr_parbin(ctr_parser *p, size_t prec) {
         }
         ctr_node *bin = malloc(sizeof(ctr_node));
         *bin = (ctr_node){
-            .tt = ND_BINARY,
+            .tt = CTR_ND_BINARY,
             .line = op->line, .column = op->column,
-            .statement.binary = {
+            .inner.binary = {
                 .tt = op->tt,
                 .left = left,
                 .right = ex.value.ok,
@@ -432,16 +435,16 @@ ctr_parse_ex ctr_parif(ctr_parser *p) {
     ctr_token *tk_if = p->tok++;
     ctr_parse_ex cex = ctr_parbin(p, 0);
     if (!cex.is_ok) return cex;
-    if (cex.value.ok->tt != ND_BINARY || !ctr_iscondition(cex.value.ok->statement.binary.tt)) {
+    if (cex.value.ok->tt != CTR_ND_BINARY || !ctr_niscondition(cex.value.ok)) {
         size_t line = cex.value.ok->line;
         size_t column = cex.value.ok->column;
         ctr_node_free(cex.value.ok);
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERR_EXPECTED_CONDITION, line, column});
+        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_CONDITION, line, column});
     }
 
     if (p->tok->tt != TK_LEFT_BRACE) {
         ctr_node_free(cex.value.ok);
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERR_EXPECTED_BLOCK, p->tok->line, p->tok->column});
+        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_BLOCK, p->tok->line, p->tok->column});
     }
     ctr_parse_ex tex = ctr_parblock(p);
     if (!tex.is_ok) {
@@ -454,7 +457,7 @@ ctr_parse_ex ctr_parif(ctr_parser *p) {
         if (p->tok->tt != TK_LEFT_BRACE) {
             ctr_node_free(cex.value.ok);
             ctr_node_free(tex.value.ok);
-            return ctr_parse_ex_err((ctr_parse_err){CTR_ERR_EXPECTED_BLOCK, p->tok->line, p->tok->column});
+            return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_BLOCK, p->tok->line, p->tok->column});
         }
         eex = ctr_parblock(p);
         if (!eex.is_ok) {
@@ -466,9 +469,9 @@ ctr_parse_ex ctr_parif(ctr_parser *p) {
 
     ctr_node *n_if = malloc(sizeof(ctr_node));
     *n_if = (ctr_node){
-        .tt = ND_IF,
+        .tt = CTR_ND_IF,
         .line = tk_if->line, .column = tk_if->column,
-        .statement.stmt_if = {
+        .inner.stmt_if = {
             .condition = cex.value.ok,
             .then_node = tex.value.ok,
             .else_node = eex.is_ok ? eex.value.ok : NULL,
@@ -481,26 +484,26 @@ ctr_parse_ex ctr_parlet(ctr_parser *p) {
     ctr_token *let = p->tok++;
 
     if (p->tok->tt != TK_IDENTIFIER)
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERR_EXPECTED_IDENTIFIER, p->tok->line, p->tok->column});
+        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_IDENTIFIER, p->tok->line, p->tok->column});
     ctr_token *name = p->tok++;
 
     if (p->tok->tt != TK_EQUAL)
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERR_EXPECTED_EQUAL, p->tok->line, p->tok->column});
+        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_EQUAL, p->tok->line, p->tok->column});
     ++p->tok;
 
     ctr_parse_ex vex = ctr_parbin(p, 0);
     if (!vex.is_ok) return vex;
     if (p->tok->tt != TK_SEMICOLON) {
         ctr_node_free(vex.value.ok);
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERR_EXPECTED_SEMICOLON, p->tok->line, p->tok->column});
+        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_SEMICOLON, p->tok->line, p->tok->column});
     }
     ++p->tok;
 
     ctr_node *n_let = malloc(sizeof(ctr_node));
     *n_let = (ctr_node){
-        .tt = ND_LET,
+        .tt = CTR_ND_LET,
         .line = let->line, .column = let->column,
-        .statement.stmt_let = {
+        .inner.stmt_let = {
             .name = ctr_dref(name->value),
             .value = vex.value.ok,
         }
@@ -510,26 +513,26 @@ ctr_parse_ex ctr_parlet(ctr_parser *p) {
 
 ctr_parse_ex ctr_parassign(ctr_parser *p) {
     if (p->tok->tt != TK_IDENTIFIER)
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERR_EXPECTED_IDENTIFIER, p->tok->line, p->tok->column});
+        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_IDENTIFIER, p->tok->line, p->tok->column});
     ctr_token *name = p->tok++;
 
     if (p->tok->tt != TK_EQUAL)
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERR_EXPECTED_EQUAL, p->tok->line, p->tok->column});
+        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_EQUAL, p->tok->line, p->tok->column});
     ++p->tok;
 
     ctr_parse_ex vex = ctr_parbin(p, 0);
     if (!vex.is_ok) return vex;
     if (p->tok->tt != TK_SEMICOLON) {
         ctr_node_free(vex.value.ok);
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERR_EXPECTED_SEMICOLON, p->tok->line, p->tok->column});
+        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_SEMICOLON, p->tok->line, p->tok->column});
     }
     ++p->tok;
 
     ctr_node *n_assign = malloc(sizeof(ctr_node));
     *n_assign = (ctr_node){
-        .tt = ND_ASSIGN,
+        .tt = CTR_ND_ASSIGN,
         .line = name->line, .column = name->column,
-        .statement.stmt_assign = {
+        .inner.stmt_assign = {
             .name = ctr_dref(name->value),
             .value = vex.value.ok,
         }
@@ -539,18 +542,18 @@ ctr_parse_ex ctr_parassign(ctr_parser *p) {
 
 ctr_parse_ex ctr_parcall(ctr_parser *p) {
     if (p->tok->tt != TK_IDENTIFIER)
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERR_EXPECTED_IDENTIFIER, p->tok->line, p->tok->column});
+        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_IDENTIFIER, p->tok->line, p->tok->column});
     ctr_token *name = p->tok++;
 
     if (p->tok->tt != TK_LEFT_PAREN)
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERR_EXPECTED_LPAREN, p->tok->line, p->tok->column});
+        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_LPAREN, p->tok->line, p->tok->column});
     ++p->tok;
 
     ctr_node *n_call = malloc(sizeof(ctr_node));
     *n_call = (ctr_node){
-        .tt = ND_CALL,
+        .tt = CTR_ND_CALL,
         .line = name->line, .column = name->column,
-        .statement.stmt_call = {
+        .inner.stmt_call = {
             .name = ctr_dref(name->value),
             .args = NULL,
             .arg_c = 0,
@@ -563,18 +566,12 @@ ctr_parse_ex ctr_parcall(ctr_parser *p) {
             ctr_node_free(n_call);
             return arg;
         }
-        n_call->statement.stmt_call.args = realloc(n_call->statement.stmt_call.args, ++n_call->statement.stmt_call.arg_c * sizeof(ctr_node *));
-        n_call->statement.stmt_call.args[n_call->statement.stmt_call.arg_c - 1] = arg.value.ok;
+        n_call->inner.stmt_call.args = realloc(n_call->inner.stmt_call.args, ++n_call->inner.stmt_call.arg_c * sizeof(ctr_node *));
+        n_call->inner.stmt_call.args[n_call->inner.stmt_call.arg_c - 1] = arg.value.ok;
         if (p->tok->tt != TK_COMMA && p->tok->tt != TK_RIGHT_PAREN) {
             ctr_node_free(n_call);
-            return ctr_parse_ex_err((ctr_parse_err){CTR_ERR_UNTERMINATED_ARGS, p->tok->line, p->tok->column});
+            return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_UNTERMINATED_ARGS, p->tok->line, p->tok->column});
         }
-    }
-    ++p->tok;
-
-    if (p->tok->tt != TK_SEMICOLON) {
-        ctr_node_free(n_call);
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERR_EXPECTED_SEMICOLON, p->tok->line, p->tok->column});
     }
     ++p->tok;
 
@@ -584,9 +581,9 @@ ctr_parse_ex ctr_parcall(ctr_parser *p) {
 ctr_parse_ex ctr_parblock(ctr_parser *p) {
     ctr_node *n_block = malloc(sizeof(ctr_node));
     *n_block = (ctr_node){
-        .tt = ND_BLOCK,
+        .tt = CTR_ND_BLOCK,
         .line = p->tok->line, .column = p->tok->column,
-        .statement.block = {
+        .inner.block = {
             .stmts = NULL,
             .count = 0,
         },
@@ -599,13 +596,13 @@ ctr_parse_ex ctr_parblock(ctr_parser *p) {
             ctr_node_free(n_block);
             return sex;
         }
-        n_block->statement.block.stmts = realloc(n_block->statement.block.stmts, ++n_block->statement.block.count * sizeof(ctr_node *));
-        n_block->statement.block.stmts[n_block->statement.block.count - 1] = sex.value.ok;
+        n_block->inner.block.stmts = realloc(n_block->inner.block.stmts, ++n_block->inner.block.count * sizeof(ctr_node *));
+        n_block->inner.block.stmts[n_block->inner.block.count - 1] = sex.value.ok;
     }
 
     if (st == TK_LEFT_BRACE && p->tok->tt != TK_RIGHT_BRACE) {
         ctr_node_free(n_block);
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERR_EXPECTED_RBRACE, p->tok->line, p->tok->column});
+        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_RBRACE, p->tok->line, p->tok->column});
     }
     ++p->tok;
 
@@ -618,18 +615,15 @@ ctr_parse_ex ctr_parreturn(ctr_parser *p) {
     if (!expr.is_ok) return expr;
     if (p->tok->tt != TK_SEMICOLON) {
         ctr_node_free(expr.value.ok);
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERR_EXPECTED_SEMICOLON, p->tok->line, p->tok->column});
+        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_SEMICOLON, p->tok->line, p->tok->column});
     }
     ++p->tok;
 
     ctr_node *n_ret = malloc(sizeof(ctr_node));
     *n_ret = (ctr_node){
-        .tt = ND_RETURN,
+        .tt = CTR_ND_RETURN,
         .line = (p->tok - 1)->line, .column = (p->tok - 1)->column,
-        .statement.unary = {
-            .tt = TK_RETURN,
-            .expr = expr.value.ok,
-        },
+        .inner.stmt_ret = expr.value.ok,
     };
     return ctr_parse_ex_ok(n_ret);
 }
@@ -645,13 +639,13 @@ ctr_parse_ex ctr_parstmt(ctr_parser *p) {
                 case TK_EQUAL: return ctr_parassign(p);
                 default: return ctr_parbin(p, 0);
             }
-        default: return ctr_parse_ex_err((ctr_parse_err){CTR_ERR_EXPECTED_STMT, p->tok->line, p->tok->column});
+        default: return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_STMT, p->tok->line, p->tok->column});
     };
 }
 
 ctr_parse_ex ctr_parse(ctr_tokenvec *tokens) {
     if (tokens->count == 0)
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERR_NO_TOKENS, 0, 0});
+        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_NO_TOKENS, 0, 0});
     ctr_parser p = { tokens->data };
     return ctr_parstmt(&p);
 }

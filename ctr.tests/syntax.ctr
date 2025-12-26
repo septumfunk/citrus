@@ -1,2 +1,9 @@
-let fun = (test) => { return test; };
-fun(4);
+let x = 4;
+let y = 4.0;
+let cond = x == y;
+
+if cond == 1 {
+    return "hooray";
+} else {
+    return -4.0;
+}

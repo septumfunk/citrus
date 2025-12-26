@@ -25,6 +25,8 @@ typedef enum {
 
     CTR_OP_ADD,
     CTR_OP_SUB,
+    CTR_OP_MUL,
+    CTR_OP_DIV,
 
     CTR_OP_EQ,
     CTR_OP_LT,
@@ -113,6 +115,7 @@ typedef struct {
 #define CTR_NIL (ctr_val){.tt = CTR_TNIL}
 #define VEC_NAME ctr_valvec
 #define VEC_T ctr_val
+#define SIZE_T uint32_t
 #include <sf/containers/vec.h>
 
 /// Function prototype. This is the main unit of bytecode

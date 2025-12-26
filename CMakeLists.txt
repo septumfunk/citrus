@@ -9,6 +9,7 @@ set(LIBRARY_TYPE STATIC)
 project(citrus C)
 add_library(${PROJECT_NAME} ${LIBRARY_TYPE}
     src/bytecode.c
+    src/ctrc.c
     src/syntax.c
     src/vm.c
 )

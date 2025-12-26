@@ -1,4 +1,5 @@
-#include <ctr/syntax.h>
+#include <ctr/ctrc.h>
+#include <ctr/vm.h>
 #include <sf/fs.h>
 #include <sf/containers/buffer.h>
 #include <stdio.h>
@@ -18,17 +19,18 @@ int main(void) {
     fsb.value.ok.flags = SF_BUFFER_GROW;
     sf_buffer_autoins(&fsb.value.ok, ""); // [\0]
 
-    ctr_scan_ex ex = ctr_scan(sf_ref((char *)fsb.value.ok.ptr));
+    ctr_compile_ex ex = ctr_cproto(sf_ref((char *)fsb.value.ok.ptr));
     if (!ex.is_ok) {
-        fprintf(stderr, "Fucked Token: %s\n", ex.value.err.token.c_str);
-        sf_str_free(ex.value.err.token);
         return -1;
     }
-    ctr_parse_ex pex = ctr_parse(&ex.
-        value.ok);
-    if (!pex.is_ok) {
+
+    ctr_state *s = ctr_state_new();
+    ctr_call_ex ex2 = ctr_call(s, &ex.value.ok, NULL);
+    if (!ex2.is_ok) {
         return -1;
     }
-    ctr_node_free(pex.value.ok);
-    ctr_tokenvec_free(&ex.value.ok);
+
+    sf_str ret = ctr_tostring(ex2.value.ok);
+    printf("[RET] [Type: %s] %s", ctr_typename(ex2.value.ok).c_str, ret.c_str);
+    sf_str_free(ret);
 }

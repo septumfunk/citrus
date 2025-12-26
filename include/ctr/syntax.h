@@ -31,10 +31,10 @@ typedef struct {
 
 typedef struct {
     enum ctr_scan_errt {
-        CTR_ERR_UNEXPECTED_TOKEN,
-        CTR_ERR_UNTERMINATED_STR,
-        CTR_ERR_NUMBER_FORMAT,
-    } type;
+        CTR_ERRS_UNEXPECTED_TOKEN,
+        CTR_ERRS_UNTERMINATED_STR,
+        CTR_ERRS_NUMBER_FORMAT,
+    } tt;
     sf_str token;
     uint32_t line, column;
 } ctr_scan_err;
@@ -63,32 +63,28 @@ void _ctr_keywords_cleanup(struct ctr_keywords *vec);
 EXPORT ctr_scan_ex ctr_scan(sf_str src);
 
 typedef enum {
-    ND_BINARY,
-    ND_UNARY,
-    ND_IDENTIFIER,
-    ND_LITERAL,
-    ND_LET,
-    ND_ASSIGN,
-    ND_CALL,
-    ND_IF,
-    ND_BLOCK,
-    ND_RETURN,
+    CTR_ND_BINARY,
+    CTR_ND_IDENTIFIER,
+    CTR_ND_LITERAL,
+    CTR_ND_LET,
+    CTR_ND_ASSIGN,
+    CTR_ND_CALL,
+    CTR_ND_IF,
+    CTR_ND_BLOCK,
+    CTR_ND_RETURN,
 } ctr_nodetype;
 
 typedef struct ctr_node {
     ctr_nodetype tt;
     size_t line, column;
-    union ctr_statement {
+    union ctr_ninner {
         ctr_val literal, identifier;
+        struct ctr_node *stmt_ret;
         struct {
             ctr_tokentype tt;
             struct ctr_node *left;
             struct ctr_node *right;
         } binary;
-        struct {
-            ctr_tokentype tt;
-            struct ctr_node *expr;
-        } unary, stmt_ret;
         struct {
             ctr_val name;
             struct ctr_node *value;
@@ -101,32 +97,32 @@ typedef struct ctr_node {
         struct {
             ctr_val name;
             struct ctr_node **args;
-            size_t arg_c;
+            uint32_t arg_c;
         } stmt_call;
         struct {
             struct ctr_node **stmts;
-            size_t count;
+            uint32_t count;
         } block;
-    } statement;
+    } inner;
 } ctr_node;
 
+EXPORT bool ctr_niscondition(ctr_node *node);
 EXPORT void ctr_node_free(ctr_node *tree);
 
 typedef struct {
-    enum {
-        CTR_ERR_NO_TOKENS,
-        CTR_ERR_EXPECTED_EXPRESSION,
-        CTR_ERR_EXPECTED_IDENTIFIER,
-        CTR_ERR_EXPECTED_LPAREN,
-        CTR_ERR_EXPECTED_RPAREN,
-        CTR_ERR_EXPECTED_RBRACE,
-        CTR_ERR_EXPECTED_EQUAL,
-        CTR_ERR_EXPECTED_SEMICOLON,
-        CTR_ERR_EXPECTED_CONDITION,
-        CTR_ERR_EXPECTED_BLOCK,
-        CTR_ERR_EXPECTED_STMT,
-        CTR_ERR_UNTERMINATED_ARGS,
-        CTR_ERR_UNUSED_EVALUATION,
+    enum ctr_parse_errt {
+        CTR_ERRP_NO_TOKENS,
+        CTR_ERRP_EXPECTED_EXPRESSION,
+        CTR_ERRP_EXPECTED_IDENTIFIER,
+        CTR_ERRP_EXPECTED_LPAREN,
+        CTR_ERRP_EXPECTED_RPAREN,
+        CTR_ERRP_EXPECTED_RBRACE,
+        CTR_ERRP_EXPECTED_EQUAL,
+        CTR_ERRP_EXPECTED_SEMICOLON,
+        CTR_ERRP_EXPECTED_CONDITION,
+        CTR_ERRP_EXPECTED_BLOCK,
+        CTR_ERRP_EXPECTED_STMT,
+        CTR_ERRP_UNTERMINATED_ARGS,
     } tt;
     size_t line, column;
 } ctr_parse_err;
