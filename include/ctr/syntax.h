@@ -5,6 +5,7 @@
 #include "bytecode.h"
 
 typedef enum {
+    TK_SOF,
     TK_LEFT_PAREN, TK_RIGHT_PAREN, TK_LEFT_BRACE, TK_RIGHT_BRACE,
     TK_COMMA, TK_PERIOD, TK_MINUS, TK_PLUS, TK_SEMICOLON, TK_SLASH, TK_ASTERISK,
     TK_FAT_ARROW,
@@ -60,5 +61,79 @@ void _ctr_keywords_cleanup(struct ctr_keywords *vec);
 #define EXPECTED_E ctr_scan_err
 #include <sf/containers/expected.h>
 EXPORT ctr_scan_ex ctr_scan(sf_str src);
+
+typedef enum {
+    ND_BINARY,
+    ND_UNARY,
+    ND_IDENTIFIER,
+    ND_LITERAL,
+    ND_LET,
+    ND_ASSIGN,
+    ND_CALL,
+    ND_IF,
+    ND_BLOCK,
+    ND_RETURN,
+} ctr_nodetype;
+
+typedef struct ctr_node {
+    ctr_nodetype tt;
+    size_t line, column;
+    union ctr_statement {
+        ctr_val literal, identifier;
+        struct {
+            ctr_tokentype tt;
+            struct ctr_node *left;
+            struct ctr_node *right;
+        } binary;
+        struct {
+            ctr_tokentype tt;
+            struct ctr_node *expr;
+        } unary, stmt_ret;
+        struct {
+            ctr_val name;
+            struct ctr_node *value;
+        } stmt_let, stmt_assign;
+        struct {
+            struct ctr_node *condition;
+            struct ctr_node *then_node;
+            struct ctr_node *else_node;
+        } stmt_if;
+        struct {
+            ctr_val name;
+            struct ctr_node **args;
+            size_t arg_c;
+        } stmt_call;
+        struct {
+            struct ctr_node **stmts;
+            size_t count;
+        } block;
+    } statement;
+} ctr_node;
+
+EXPORT void ctr_node_free(ctr_node *tree);
+
+typedef struct {
+    enum {
+        CTR_ERR_NO_TOKENS,
+        CTR_ERR_EXPECTED_EXPRESSION,
+        CTR_ERR_EXPECTED_IDENTIFIER,
+        CTR_ERR_EXPECTED_LPAREN,
+        CTR_ERR_EXPECTED_RPAREN,
+        CTR_ERR_EXPECTED_RBRACE,
+        CTR_ERR_EXPECTED_EQUAL,
+        CTR_ERR_EXPECTED_SEMICOLON,
+        CTR_ERR_EXPECTED_CONDITION,
+        CTR_ERR_EXPECTED_BLOCK,
+        CTR_ERR_EXPECTED_STMT,
+        CTR_ERR_UNUSED_EVALUATION,
+    } tt;
+    size_t line, column;
+} ctr_parse_err;
+
+#define EXPECTED_NAME ctr_parse_ex
+#define EXPECTED_O ctr_node *
+#define EXPECTED_E ctr_parse_err
+#include <sf/containers/expected.h>
+EXPORT ctr_parse_ex ctr_parse(ctr_tokenvec *tokens);
 
 #endif // SYNTAX_H

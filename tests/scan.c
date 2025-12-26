@@ -24,8 +24,11 @@ int main(void) {
         sf_str_free(ex.value.err.token);
         return -1;
     }
-    sf_str i1 = *(sf_str *)ex.value.ok.data[0].value.val.dyn;
-    sf_str i2 = *(sf_str *)ex.value.ok.data[2].value.val.dyn;
-    (void)i1;(void)i2;
+    ctr_parse_ex pex = ctr_parse(&ex.
+        value.ok);
+    if (!pex.is_ok) {
+        return -1;
+    }
+    ctr_node_free(pex.value.ok);
     ctr_tokenvec_free(&ex.value.ok);
 }

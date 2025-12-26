@@ -143,17 +143,17 @@ typedef ctr_proto *ctr_dfun;
 
 /// Allocates a dynamic object, a heap allocated object with an information header.
 EXPORT ctr_val ctr_dnew(ctr_dtype tt);
-static inline ctr_dheader *ctr_header(ctr_val val) { return (ctr_dheader *)((char *)val.val.dyn - sizeof(ctr_dheader)); }
+static inline ctr_dheader *ctr_header(ctr_val val) { return val.tt == CTR_TDYN ? (ctr_dheader *)((char *)val.val.dyn - sizeof(ctr_dheader)) : NULL; }
 /// Make a new reference to a dynamic object.
 static inline ctr_val ctr_dref(ctr_val val) {
     ctr_dheader *dh = ctr_header(val);
-    if (!dh->is_const) ++ctr_header(val)->rc;
+    if (dh && !dh->is_const) ++ctr_header(val)->rc;
     return val;
 }
 /// Delete a reference to a dynamic object.
 static inline void ctr_ddel(ctr_val val) {
     ctr_dheader *dh = ctr_header(val);
-    if (!dh->is_const && --dh->rc == 0)
+    if (dh && !dh->is_const && --dh->rc == 0)
         free(dh);
 }
 
