@@ -305,18 +305,18 @@ void ctr_node_free(ctr_node *tree) {
     free(tree);
 }
 
-int ctr_precedence(ctr_tokentype tt) {
+size_t ctr_precedence(ctr_tokentype tt) {
     switch (tt) {
-        case TK_FAT_ARROW: return 0;
-        case TK_OR: return 1;
-        case TK_AND: return 2;
+        case TK_FAT_ARROW: return 1;
+        case TK_OR: return 2;
+        case TK_AND: return 3;
         case TK_DOUBLE_EQUAL:
-        case TK_NOT_EQUAL: return 3;
+        case TK_NOT_EQUAL: return 4;
         case TK_LESS: case TK_LESS_EQUAL:
-        case TK_GREATER: case TK_GREATER_EQUAL: return 4;
-        case TK_PLUS: case TK_MINUS: return 5;
-        case TK_ASTERISK: case TK_SLASH: return 6;
-        default: return -1;
+        case TK_GREATER: case TK_GREATER_EQUAL: return 5;
+        case TK_PLUS: case TK_MINUS: return 6;
+        case TK_ASTERISK: case TK_SLASH: return 7;
+        default: return SIZE_MAX;
     }
 }
 bool ctr_lassoc(ctr_tokentype tt) {
@@ -342,8 +342,7 @@ static inline bool ctr_parpeek(ctr_parser *p, ctr_tokentype match) {
 }
 
 ctr_parse_ex ctr_parprim(ctr_parser *p);
-ctr_parse_ex ctr_parbin(ctr_parser *p, int prec);
-
+ctr_parse_ex ctr_parbin(ctr_parser *p, size_t prec);
 ctr_parse_ex ctr_parif(ctr_parser *p);
 ctr_parse_ex ctr_parlet(ctr_parser *p);
 ctr_parse_ex ctr_parassign(ctr_parser *p);
@@ -380,19 +379,21 @@ ctr_parse_ex ctr_parprim(ctr_parser *p) {
     }
 }
 
-ctr_parse_ex ctr_parbin(ctr_parser *p, int prec) {
+ctr_parse_ex ctr_parbin(ctr_parser *p, size_t prec) {
     ctr_parse_ex ex = ctr_parprim(p);
     if (!ex.is_ok) return ex;
 
     ctr_node *left = ex.value.ok;
     while (true) {
         ctr_token *op = p->tok;
-        int op_prec = ctr_precedence(op->tt);
-        if (op_prec < prec)
+        size_t op_prec = ctr_precedence(op->tt);
+        if (op_prec == SIZE_MAX || op_prec < prec)
             break;
         ++p->tok;
 
-        ex = ctr_parbin(p, ctr_lassoc(op->tt) ? prec + 1 : prec);
+        ex = op->tt == TK_FAT_ARROW ?
+            ctr_parblock(p) :
+            ctr_parbin(p, ctr_lassoc(op->tt) ? op_prec + 1 : op_prec);
         if (!ex.is_ok) {
             ctr_node_free(left);
             return ex;
@@ -416,7 +417,7 @@ ctr_parse_ex ctr_parif(ctr_parser *p) {
     ctr_token *tk_if = p->tok++;
     ctr_parse_ex cex = ctr_parbin(p, 0);
     if (!cex.is_ok) return cex;
-    if (!ctr_iscondition(cex.value.ok->statement.binary.tt)) {
+    if (cex.value.ok->tt != ND_BINARY || !ctr_iscondition(cex.value.ok->statement.binary.tt)) {
         size_t line = cex.value.ok->line;
         size_t column = cex.value.ok->column;
         ctr_node_free(cex.value.ok);
@@ -549,13 +550,12 @@ ctr_parse_ex ctr_parcall(ctr_parser *p) {
         }
         n_call->statement.stmt_call.args = realloc(n_call->statement.stmt_call.args, ++n_call->statement.stmt_call.arg_c * sizeof(ctr_node *));
         n_call->statement.stmt_call.args[n_call->statement.stmt_call.arg_c - 1] = arg.value.ok;
+        if (p->tok->tt != TK_COMMA && p->tok->tt != TK_RIGHT_PAREN) {
+            ctr_node_free(n_call);
+            return ctr_parse_ex_err((ctr_parse_err){CTR_ERR_UNTERMINATED_ARGS, p->tok->line, p->tok->column});
+        }
+        ++p->tok;
     }
-
-    if (p->tok->tt != TK_RIGHT_PAREN) {
-        ctr_node_free(n_call);
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERR_EXPECTED_RPAREN, p->tok->line, p->tok->column});
-    }
-    ++p->tok;
 
     if (p->tok->tt != TK_SEMICOLON) {
         ctr_node_free(n_call);

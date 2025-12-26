@@ -125,13 +125,16 @@ typedef struct {
         CTR_ERR_EXPECTED_CONDITION,
         CTR_ERR_EXPECTED_BLOCK,
         CTR_ERR_EXPECTED_STMT,
+        CTR_ERR_UNTERMINATED_ARGS,
         CTR_ERR_UNUSED_EVALUATION,
     } tt;
     size_t line, column;
 } ctr_parse_err;
 
+typedef ctr_node *ctr_ast;
+
 #define EXPECTED_NAME ctr_parse_ex
-#define EXPECTED_O ctr_node *
+#define EXPECTED_O ctr_ast
 #define EXPECTED_E ctr_parse_err
 #include <sf/containers/expected.h>
 EXPORT ctr_parse_ex ctr_parse(ctr_tokenvec *tokens);
