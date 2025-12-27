@@ -1,9 +1,9 @@
 let x = 4;
 let y = 4.0;
-let cond = x == y;
+let t = [x]() { x = 2; return x; };
 
-if cond == 1 {
-    return "hooray";
+if t() == x {
+    return "Closures";
 } else {
-    return -4.0;
+    return nil;
 }

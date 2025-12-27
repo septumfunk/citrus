@@ -34,6 +34,7 @@ ctr_proto ctr_proto_new(void) {
         .arg_c = 0,
         .entry = 0,
         .constants = ctr_valvec_new(),
+        .upvals = NULL,
     };
 }
 
@@ -42,6 +43,12 @@ void ctr_proto_free(ctr_proto *proto) {
         free(proto->code);
     proto->code = NULL;
     ctr_valvec_free(&proto->constants);
+    if (proto->upvals) {
+        for (uint32_t i = 0; i < proto->up_c; ++i)
+            sf_str_free(proto->upvals[i].name);
+        free(proto->upvals);
+    }
+    proto->up_c = 0;
     proto->reg_c = 0;
 }
 
@@ -51,18 +58,25 @@ ctr_val ctr_dnew(ctr_dtype tt) {
     switch (tt) {
         case CTR_DSTR: size = sizeof(sf_str); break;
         case CTR_DOBJ: size = sizeof(ctr_dobj); break;
-        case CTR_DFUN: size = sizeof(ctr_dfun); break;
+        case CTR_DFUN: size = sizeof(ctr_proto); break;
+        case CTR_DVAL: size = sizeof(ctr_val); break;
         case CTR_DCOUNT: return CTR_NIL;
     }
 
     ctr_dyn p = calloc(1, sizeof(ctr_dheader) + size);
-    *(ctr_dheader *)p = (ctr_dheader){size, false, tt, 1};
+    *(ctr_dheader *)p = (ctr_dheader){
+        .size = size,
+        .is_const = false,
+        .tt = tt,
+        .rc = 1,
+    };
     p = (char *)p + sizeof(ctr_dheader);
 
     switch (tt) {
         case CTR_DSTR: *(sf_str *)p = SF_STR_EMPTY; break;
         case CTR_DOBJ: *(ctr_dobj *)p = ctr_dobj_new(); break;
-        case CTR_DFUN: *(ctr_dfun *)p = NULL; break;
+        case CTR_DFUN: *(ctr_proto *)p = (ctr_proto){.code = NULL, .code_s = 0}; break;
+        case CTR_DVAL: *(ctr_val *)p = CTR_NIL; break;
         case CTR_DCOUNT: return CTR_NIL;
     }
     return (ctr_val){ .tt = CTR_TDYN, .val.dyn = p };
@@ -367,6 +381,22 @@ const ctr_inssig CTR_OP_INFO[CTR_OP_COUNT] = {
         .opcode = CTR_OP_LE,
         .mnemonic = "le",
         .type = CTR_INS_ABC,
+    },
+
+    [CTR_OP_UP_SET] = {
+        .opcode = CTR_OP_UP_SET,
+        .mnemonic = "up.set",
+        .type = CTR_INS_AB,
+    },
+    [CTR_OP_UP_GET] = {
+        .opcode = CTR_OP_UP_GET,
+        .mnemonic = "up.get",
+        .type = CTR_INS_AB,
+    },
+    [CTR_OP_UP_REF] = {
+        .opcode = CTR_OP_UP_REF,
+        .mnemonic = "up.ref",
+        .type = CTR_INS_A,
     },
 
     [CTR_OP_OBJ_NEW] = {

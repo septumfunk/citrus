@@ -28,7 +28,6 @@ if (ENABLE_SANITIZERS AND NOT MSVC)
     set(SANITIZER_FLAGS
         -fsanitize=address
         -fsanitize=undefined
-        -fsanitize=leak
         -fno-omit-frame-pointer
         -g
     )

@@ -31,7 +31,7 @@ static inline bool ctr_scanpeek(ctr_scanner *s, char match) {
     return true;
 }
 
-static inline bool ctr_isnumber(char c) { return (c >= '0' && c <= '9') || c == '-'; }
+static inline bool ctr_isnumber(char c) { return c >= '0' && c <= '9'; }
 static inline bool ctr_isalphan(char c) { return (c >= 'A' && c <= 'Z')|| (c >= 'a' && c <= 'z') || c == '_' || ctr_isnumber(c); }
 
 ctr_token ctr_scanstr(ctr_scanner *s) {
@@ -168,6 +168,8 @@ ctr_scan_ex ctr_scan(sf_str src) {
             ctr_scancase(')', TK_RIGHT_PAREN);
             ctr_scancase('{', TK_LEFT_BRACE);
             ctr_scancase('}', TK_RIGHT_BRACE);
+            ctr_scancase('[', TK_LEFT_BRACKET);
+            ctr_scancase(']', TK_RIGHT_BRACKET);
             ctr_scancase(',', TK_COMMA);
             ctr_scancase('.', TK_PERIOD);
             ctr_scancase('+', TK_PLUS);
@@ -176,13 +178,8 @@ ctr_scan_ex ctr_scan(sf_str src) {
             ctr_scancase('!', ctr_scanpeek(&s, '=') ? TK_NOT_EQUAL : TK_BANG);
             ctr_scancase('<', ctr_scanpeek(&s, '=') ? TK_LESS_EQUAL : TK_LESS);
             ctr_scancase('>', ctr_scanpeek(&s, '=') ? TK_GREATER_EQUAL : TK_GREATER);
+            ctr_scancase('=', ctr_scanpeek(&s, '=') ? TK_DOUBLE_EQUAL : TK_EQUAL);
 
-            case '=': {
-                if (ctr_scanpeek(&s, '=')) { s.current.tt = TK_DOUBLE_EQUAL; break; }
-                if (ctr_scanpeek(&s, '>')) { s.current.tt = TK_FAT_ARROW; break; }
-                s.current.tt = TK_EQUAL;
-                break;
-            }
             case '&': {
                 if (ctr_scanpeek(&s, '&')) { s.current.tt = TK_AND; break; }
                 goto err;
@@ -222,7 +219,7 @@ ctr_scan_ex ctr_scan(sf_str src) {
                     ctr_tokenvec_push(&tks, s.current);
                     continue;
                 }
-                if (ctr_isnumber(c)) { // Number
+                if (ctr_isnumber(c) || (c == '-' && ctr_isnumber(s.src.c_str[s.cc + 1]))) { // Number
                     s.current = ctr_scannum(&s);
                     if (s.current.tt != TK_NUMBER && s.current.tt != TK_INTEGER) {
                         eval = CTR_ERRS_NUMBER_FORMAT;
@@ -297,10 +294,24 @@ void ctr_node_free(ctr_node *tree) {
             break;
         case CTR_ND_BLOCK:
             if (tree->inner.block.stmts) {
-                for (size_t i = 0; i < tree->inner.block.count; ++i)
+                for (uint32_t i = 0; i < tree->inner.block.count; ++i)
                     ctr_node_free(tree->inner.block.stmts[i]);
                 free(tree->inner.block.stmts);
             }
+            break;
+        case CTR_ND_FUN:
+            if (tree->inner.fun.captures) {
+                for (uint32_t i = 0; i < tree->inner.fun.cap_c; ++i)
+                    ctr_ddel(tree->inner.fun.captures[i]);
+                free(tree->inner.fun.captures);
+            }
+            if (tree->inner.fun.args) {
+                for (uint32_t i = 0; i < tree->inner.fun.arg_c; ++i)
+                    ctr_ddel(tree->inner.fun.args[i]);
+                free(tree->inner.fun.args);
+            }
+            if (tree->inner.fun.block)
+                ctr_node_free(tree->inner.fun.block);
             break;
     }
     free(tree);
@@ -308,22 +319,15 @@ void ctr_node_free(ctr_node *tree) {
 
 size_t ctr_precedence(ctr_tokentype tt) {
     switch (tt) {
-        case TK_FAT_ARROW: return 1;
-        case TK_OR: return 2;
-        case TK_AND: return 3;
+        case TK_OR: return 1;
+        case TK_AND: return 2;
         case TK_DOUBLE_EQUAL:
-        case TK_NOT_EQUAL: return 4;
+        case TK_NOT_EQUAL: return 3;
         case TK_LESS: case TK_LESS_EQUAL:
-        case TK_GREATER: case TK_GREATER_EQUAL: return 5;
-        case TK_PLUS: case TK_MINUS: return 6;
-        case TK_ASTERISK: case TK_SLASH: return 7;
+        case TK_GREATER: case TK_GREATER_EQUAL: return 4;
+        case TK_PLUS: case TK_MINUS: return 5;
+        case TK_ASTERISK: case TK_SLASH: return 6;
         default: return SIZE_MAX;
-    }
-}
-bool ctr_lassoc(ctr_tokentype tt) {
-    switch (tt) {
-        case TK_FAT_ARROW: return false;
-        default: return true;
     }
 }
 bool ctr_niscondition(ctr_node *node) {
@@ -351,6 +355,7 @@ ctr_parse_ex ctr_parlet(ctr_parser *p);
 ctr_parse_ex ctr_parassign(ctr_parser *p);
 ctr_parse_ex ctr_parcall(ctr_parser *p);
 ctr_parse_ex ctr_parblock(ctr_parser *p);
+ctr_parse_ex ctr_parfun(ctr_parser *p);
 ctr_parse_ex ctr_parreturn(ctr_parser *p);
 ctr_parse_ex ctr_parstmt(ctr_parser *p);
 
@@ -366,11 +371,16 @@ ctr_parse_ex ctr_parprim(ctr_parser *p) {
             ++p->tok;
             return ctr_parse_ex_ok(n);
         }
+        case TK_LEFT_BRACKET: {
+            ctr_parse_ex fex = ctr_parfun(p);
+            if (!fex.is_ok) return fex;
+            return fex;
+        }
         case TK_IDENTIFIER: {
             if ((p->tok + 1)->tt == TK_LEFT_PAREN) { // Call
                 ctr_parse_ex cex = ctr_parcall(p);
                 if (!cex.is_ok) return cex;
-                return ctr_parse_ex_ok(cex.value.ok);
+                return cex;
             } else { // Identifier
                 ctr_node *n = malloc(sizeof(ctr_node));
                 *n = (ctr_node){
@@ -409,9 +419,7 @@ ctr_parse_ex ctr_parbin(ctr_parser *p, size_t prec) {
             break;
         ++p->tok;
 
-        ex = op->tt == TK_FAT_ARROW ?
-            ctr_parblock(p) :
-            ctr_parbin(p, ctr_lassoc(op->tt) ? op_prec + 1 : op_prec);
+        ex = ctr_parbin(p, op_prec + 1);
         if (!ex.is_ok) {
             ctr_node_free(left);
             return ex;
@@ -572,6 +580,7 @@ ctr_parse_ex ctr_parcall(ctr_parser *p) {
             ctr_node_free(n_call);
             return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_UNTERMINATED_ARGS, p->tok->line, p->tok->column});
         }
+        if (p->tok->tt == TK_COMMA) ++p->tok;
     }
     ++p->tok;
 
@@ -607,6 +616,65 @@ ctr_parse_ex ctr_parblock(ctr_parser *p) {
     ++p->tok;
 
     return ctr_parse_ex_ok(n_block);
+}
+
+ctr_parse_ex ctr_parfun(ctr_parser *p) {
+    ++p->tok; // Consume [
+    ctr_node *n_fun = malloc(sizeof(ctr_node));
+    *n_fun = (ctr_node){
+        .tt = CTR_ND_FUN,
+        .line = p->tok->line, .column = p->tok->column,
+        .inner.fun = {
+            .captures = NULL,
+            .cap_c = 0,
+            .args = NULL,
+            .arg_c = 0,
+        },
+    };
+
+    while (p->tok->tt != TK_RIGHT_BRACKET && p->tok->tt != TK_EOF) {
+        if (p->tok->tt != TK_IDENTIFIER)
+            return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_IDENTIFIER, p->tok->line, p->tok->column});
+        n_fun->inner.fun.captures = realloc(n_fun->inner.fun.captures, (++n_fun->inner.fun.cap_c) * sizeof(ctr_val));
+        n_fun->inner.fun.captures[n_fun->inner.fun.cap_c - 1] = ctr_dref(p->tok->value);
+        ++p->tok;
+
+        if (p->tok->tt != TK_COMMA && p->tok->tt != TK_RIGHT_BRACKET) {
+            ctr_node_free(n_fun);
+            return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_UNTERMINATED_CAPTURES, p->tok->line, p->tok->column});
+        }
+        if (p->tok->tt == TK_COMMA) ++p->tok;
+    }
+    ++p->tok;
+
+    if (p->tok->tt != TK_LEFT_PAREN)
+        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_ARGS, p->tok->line, p->tok->column});
+    ++p->tok;
+    while (p->tok->tt != TK_RIGHT_PAREN && p->tok->tt != TK_EOF) {
+        if (p->tok->tt != TK_IDENTIFIER)
+            return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_IDENTIFIER, p->tok->line, p->tok->column});
+        n_fun->inner.fun.captures = realloc(n_fun->inner.fun.captures, ++n_fun->inner.fun.cap_c * sizeof(ctr_val *));
+        n_fun->inner.fun.captures[n_fun->inner.fun.cap_c - 1] = ctr_dref(p->tok->value);
+        ++p->tok;
+
+        if (p->tok->tt != TK_COMMA && p->tok->tt != TK_RIGHT_PAREN) {
+            ctr_node_free(n_fun);
+            return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_UNTERMINATED_CAPTURES, p->tok->line, p->tok->column});
+        }
+        if (p->tok->tt == TK_COMMA) ++p->tok;
+    }
+    ++p->tok;
+
+    if (p->tok->tt != TK_LEFT_BRACE)
+        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_BLOCK, p->tok->line, p->tok->column});
+    ctr_parse_ex bex = ctr_parblock(p);
+    if (!bex.is_ok) {
+        ctr_node_free(n_fun);
+        return bex;
+    }
+    n_fun->inner.fun.block = bex.value.ok;
+
+    return ctr_parse_ex_ok(n_fun);
 }
 
 ctr_parse_ex ctr_parreturn(ctr_parser *p) {

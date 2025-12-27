@@ -6,13 +6,20 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+typedef struct {
+    uint32_t reg;
+    bool raw;
+    int32_t frame_o;
+} ctr_local;
 
 struct ctr_localmap;
-void _ctr_localmap_fe(void *_, sf_str key, uint32_t _v) { (void)_v; sf_str_free(key); }
+void _ctr_localmap_fe(void *_, sf_str key, ctr_local _v) { (void)_v; sf_str_free(key); }
 void _ctr_localmap_cleanup(struct ctr_localmap *);
 #define MAP_NAME ctr_localmap
 #define MAP_K sf_str
-#define MAP_V uint32_t
+#define MAP_V ctr_local
 #define EQUAL_FN sf_str_eq
 #define HASH_FN sf_str_hash
 #define CLEANUP_FN _ctr_localmap_cleanup
@@ -30,19 +37,31 @@ typedef struct {
 #define EXPECTED_E ctr_compile_err
 #include <sf/containers/expected.h>
 
+/// Define to output emitted code.
+#define CTR_EMIT_LOG
+
 static inline void ctr_cemit(ctr_compiler *c, ctr_instruction ins) {
-    c->proto.code = realloc(c->proto.code, ++c->proto.code_s);
+    #ifdef CTR_EMIT_LOG
+    switch (ctr_op_info(ctr_ins_op(ins))->type) {
+        case CTR_INS_A: printf("[COM] %s A:%d\n", ctr_op_info(ctr_ins_op(ins))->mnemonic, ctr_ia_a(ins)); break;
+        case CTR_INS_AB: printf("[COM] %s A:%u B:%u\n", ctr_op_info(ctr_ins_op(ins))->mnemonic, ctr_iab_a(ins), ctr_iab_b(ins)); break;
+        case CTR_INS_ABC: printf("[COM] %s A:%d B:%u C:%u\n", ctr_op_info(ctr_ins_op(ins))->mnemonic, ctr_iabc_a(ins), ctr_iabc_b(ins), ctr_iabc_c(ins)); break;
+    }
+    #endif
+    c->proto.code = realloc(c->proto.code, ++c->proto.code_s * sizeof(ctr_instruction));
     c->proto.code[c->proto.code_s - 1] = ins;
 }
 
-static inline uint32_t ctr_temp(ctr_compiler *c) {
+static inline uint32_t ctr_rlocal(ctr_compiler *c) { return c->locals++; }
+
+static inline uint32_t ctr_rtemp(ctr_compiler *c) {
     ++c->temps;
     c->max_temps = c->temps > c->max_temps ? c->temps : c->max_temps;
     return c->locals + c->temps - 1;
 }
 static inline void ctr_ctemps(ctr_compiler *c, uint32_t count) { c->temps -= count; }
 
-bool ctr_kexists(ctr_compiler *c, ctr_val con, uint32_t *idx) {
+bool ctr_kfind(ctr_compiler *c, ctr_val con, uint32_t *idx) {
     for (uint32_t i = 0; i < c->proto.constants.count; ++i) {
         ctr_val v = c->proto.constants.data[i];
         if (v.tt != con.tt) continue;
@@ -50,11 +69,39 @@ bool ctr_kexists(ctr_compiler *c, ctr_val con, uint32_t *idx) {
             case CTR_TNIL: *idx = i; return true;
             case CTR_TF64: if (v.val.f64 == con.val.f64) { *idx = i; return true; } else continue;
             case CTR_TI64: if (v.val.i64 == con.val.i64) { *idx = i; return true; } else continue;
-            case CTR_TDYN: if (v.val.dyn == con.val.dyn) { *idx = i; return true; } else continue;
+            case CTR_TDYN: if (sf_str_eq(*(sf_str *)v.val.dyn, *(sf_str *)con.val.dyn)) { *idx = i; return true; } else continue;
             default: continue;
         }
     }
     return false;
+}
+
+ctr_cnode_ex ctr_cnode(ctr_compiler *c, ctr_node *node, uint32_t t_reg);
+
+ctr_compile_ex ctr_cfun(ctr_node *ast, uint32_t arg_c, ctr_val *args, uint32_t up_c, ctr_upvalue *upvals) {
+    ctr_compiler c = {
+        .proto = ctr_proto_new(),
+        .ast = ast,
+        .lmap = ctr_localmap_new(),
+        .locals = arg_c,
+        .temps = 0, .max_temps = 0,
+    };
+    c.proto.arg_c = arg_c;
+    for (uint32_t i = 0; i < arg_c; ++i)
+        ctr_localmap_set(&c.lmap, sf_str_dup(*(sf_str *)args[i].val.dyn), (ctr_local){i, false, 0});
+    for (uint32_t i = 0; i < up_c; ++i)
+        ctr_localmap_set(&c.lmap, sf_str_dup(upvals[i].name), (ctr_local){i, true, upvals[i].frame_o});
+
+    ctr_valvec_push(&c.proto.constants, (ctr_val){.tt = CTR_TI64, .val.i64 = 0});
+    ctr_valvec_push(&c.proto.constants, (ctr_val){.tt = CTR_TI64, .val.i64 = 1});
+
+    c.proto.upvals = malloc(sizeof(ctr_upvalue) * up_c);
+    memcpy(c.proto.upvals, upvals, sizeof(ctr_upvalue) * up_c);
+    c.proto.up_c = up_c;
+
+    ctr_cnode_ex e = ctr_cnode(&c, c.ast, UINT_MAX);
+    c.proto.reg_c = c.locals + c.max_temps;
+    return e.is_ok ? ctr_compile_ex_ok(c.proto) : ctr_compile_ex_err(e.value.err);
 }
 
 /// Passing UINT_MAX as t_reg acts as a discard.
@@ -64,7 +111,7 @@ ctr_cnode_ex ctr_cnode(ctr_compiler *c, ctr_node *node, uint32_t t_reg) {
             if (t_reg == UINT_MAX)
                 return ctr_cnode_ex_err((ctr_compile_err){CTR_ERRC_UNUSED_EVALUATION, {0}, node->line, node->column});
 
-            uint32_t left = ctr_temp(c), right = ctr_temp(c);
+            uint32_t left = ctr_rtemp(c), right = ctr_rtemp(c);
             ctr_cnode_ex left_ex = ctr_cnode(c, node->inner.binary.left, left);
             if (!left_ex.is_ok)
                 return left_ex;
@@ -82,6 +129,10 @@ ctr_cnode_ex ctr_cnode(ctr_compiler *c, ctr_node *node, uint32_t t_reg) {
                 case TK_LESS: ctr_cemit(c, ctr_ins_abc(CTR_OP_LT, 0, left, right)); break;
                 case TK_LESS_EQUAL: ctr_cemit(c, ctr_ins_abc(CTR_OP_LE, 0, left, right)); break;
 
+                case TK_NOT_EQUAL: ctr_cemit(c, ctr_ins_abc(CTR_OP_EQ, 1, left, right)); break;
+                case TK_GREATER: ctr_cemit(c, ctr_ins_abc(CTR_OP_LT, 1, left, right)); break;
+                case TK_GREATER_EQUAL: ctr_cemit(c, ctr_ins_abc(CTR_OP_LE, 1, left, right)); break;
+
                 default:
                     return ctr_cnode_ex_err((ctr_compile_err){CTR_ERRC_UNKNOWN_OPERATION, {0}, node->line, node->column});
             }
@@ -93,16 +144,25 @@ ctr_cnode_ex ctr_cnode(ctr_compiler *c, ctr_node *node, uint32_t t_reg) {
             if (t_reg == UINT_MAX)
                 return ctr_cnode_ex_err((ctr_compile_err){CTR_ERRC_UNUSED_EVALUATION, {0}, node->line, node->column});
             ctr_localmap_ex lex = ctr_localmap_get(&c->lmap, *(sf_str *)node->inner.identifier.val.dyn);
-            if (!lex.is_ok)
-                return ctr_cnode_ex_err((ctr_compile_err){CTR_ERRC_UNKNOWN_LOCAL, {0}, node->line, node->column});
-            ctr_cemit(c, ctr_ins_ab(CTR_OP_MOVE, t_reg, lex.value.ok));
+            if (!lex.is_ok) {
+                uint32_t name_i;
+                if (!ctr_kfind(c, node->inner.stmt_assign.name, &name_i)) {
+                    ctr_valvec_push(&c->proto.constants, ctr_dref(node->inner.stmt_assign.name));
+                    name_i = c->proto.constants.count - 1;
+                }
+                uint32_t gt = ctr_rtemp(c), name = ctr_rtemp(c);
+                ctr_cemit(c, ctr_ins_ab(CTR_OP_UP_GET, gt, 0)); // state->global
+                ctr_cemit(c, ctr_ins_ab(CTR_OP_LOAD, name, name_i));
+                ctr_cemit(c, ctr_ins_abc(CTR_OP_OBJ_GET, gt, name, t_reg));
+                ctr_ctemps(c, 2);
+            } else ctr_cemit(c, ctr_ins_ab(lex.value.ok.raw ? CTR_OP_UP_GET : CTR_OP_MOVE, t_reg, lex.value.ok.reg));
             return ctr_cnode_ex_ok();
         }
         case CTR_ND_LITERAL: {
             if (t_reg == UINT_MAX)
                 return ctr_cnode_ex_err((ctr_compile_err){CTR_ERRC_UNUSED_EVALUATION, {0}, node->line, node->column});
             uint32_t pos;
-            if (!ctr_kexists(c, node->inner.literal, &pos)) {
+            if (!ctr_kfind(c, node->inner.literal, &pos)) {
                 ctr_valvec_push(&c->proto.constants, ctr_dref(node->inner.literal));
                 pos = c->proto.constants.count - 1;
             }
@@ -114,7 +174,7 @@ ctr_cnode_ex ctr_cnode(ctr_compiler *c, ctr_node *node, uint32_t t_reg) {
             uint8_t r = (uint8_t)c->locals++;
             ctr_cnode_ex rv_ex = ctr_cnode(c, node->inner.stmt_let.value, r); // temp
             if (!rv_ex.is_ok) return rv_ex;
-            ctr_localmap_set(&c->lmap, sf_str_dup(*(sf_str *)node->inner.stmt_let.name.val.dyn), r);
+            ctr_localmap_set(&c->lmap, sf_str_dup(*(sf_str *)node->inner.stmt_let.name.val.dyn), (ctr_local){r, false, 0});
             if (ctr_niscondition(node->inner.stmt_let.value)) { // Conditions
                 ctr_cemit(c, ctr_ins_ab(CTR_OP_LOAD, r, 0));
                 ctr_cemit(c, ctr_ins_ab(CTR_OP_LOAD, r, 1));
@@ -122,16 +182,25 @@ ctr_cnode_ex ctr_cnode(ctr_compiler *c, ctr_node *node, uint32_t t_reg) {
             return ctr_cnode_ex_ok();
         }
         case CTR_ND_ASSIGN: {
-            uint32_t rhs = ctr_temp(c);
+            uint32_t rhs = ctr_rtemp(c);
             ctr_cnode_ex rv_ex = ctr_cnode(c, node->inner.stmt_let.value, rhs);
             if (!rv_ex.is_ok) return rv_ex;
             ctr_localmap_ex lex = ctr_localmap_get(&c->lmap, *(sf_str *)node->inner.stmt_assign.name.val.dyn);
-            if (!lex.is_ok)
-                return ctr_cnode_ex_err((ctr_compile_err){CTR_ERRC_UNKNOWN_LOCAL, {0}, node->line, node->column});
-            ctr_cemit(c, ctr_ins_ab(CTR_OP_MOVE, lex.value.ok, rhs));
+            if (!lex.is_ok) {
+                uint32_t name_i;
+                if (!ctr_kfind(c, node->inner.stmt_assign.name, &name_i)) {
+                    ctr_valvec_push(&c->proto.constants, ctr_dref(node->inner.stmt_assign.name));
+                    name_i = c->proto.constants.count - 1;
+                }
+                uint32_t gt = ctr_rtemp(c), name = ctr_rtemp(c);
+                ctr_cemit(c, ctr_ins_ab(CTR_OP_UP_GET, gt, 0)); // state->global
+                ctr_cemit(c, ctr_ins_ab(CTR_OP_LOAD, name, name_i));
+                ctr_cemit(c, ctr_ins_abc(CTR_OP_OBJ_SET, gt, name, rhs));
+                ctr_ctemps(c, 2);
+            } else ctr_cemit(c, ctr_ins_ab(lex.value.ok.raw ? CTR_OP_MOVE : CTR_OP_UP_SET, lex.value.ok.reg, rhs));
             if (ctr_niscondition(node->inner.stmt_let.value)) { // Conditions
-                ctr_cemit(c, ctr_ins_ab(CTR_OP_LOAD, lex.value.ok, 0));
-                ctr_cemit(c, ctr_ins_ab(CTR_OP_LOAD, lex.value.ok, 1));
+                ctr_cemit(c, ctr_ins_ab(lex.value.ok.raw ? CTR_OP_MOVE : CTR_OP_UP_SET, lex.value.ok.reg, 0));
+                ctr_cemit(c, ctr_ins_ab(lex.value.ok.raw ? CTR_OP_MOVE : CTR_OP_UP_SET, lex.value.ok.reg, 1));
             }
             ctr_ctemps(c, 1); // temp
             return ctr_cnode_ex_ok();
@@ -142,19 +211,27 @@ ctr_cnode_ex ctr_cnode(ctr_compiler *c, ctr_node *node, uint32_t t_reg) {
                 return ctr_cnode_ex_err((ctr_compile_err){CTR_ERRC_UNKNOWN_LOCAL, {0}, node->line, node->column});
 
             uint32_t arg_rs = UINT32_MAX;
-            uint8_t o_temp = (uint8_t)ctr_temp(c);
             for (size_t i = 0; i < node->inner.stmt_call.arg_c; ++i) {
-                uint32_t r = ctr_temp(c);
+                uint32_t r = ctr_rtemp(c);
                 ctr_cnode_ex ex = ctr_cnode(c, node->inner.stmt_call.args[i], r);
                 if (!ex.is_ok) return ex;
                 if (arg_rs == UINT32_MAX) arg_rs = r; // first
             }
-            ctr_cemit(c, ctr_ins_abc(CTR_OP_CALL, o_temp, lex.value.ok, arg_rs == UINT32_MAX ? 0 : arg_rs));
+
+            uint32_t fun_r = lex.value.ok.reg;
+            if (lex.value.ok.raw) {
+                fun_r = ctr_rtemp(c);
+                ctr_cemit(c, ctr_ins_ab(CTR_OP_UP_GET, fun_r, lex.value.ok.reg));
+            }
+            ctr_cemit(c, ctr_ins_abc(CTR_OP_CALL, t_reg == UINT32_MAX ? ctr_rtemp(c) : t_reg, fun_r, arg_rs == UINT32_MAX ? 0 : arg_rs));
+
+            if (t_reg == UINT32_MAX) ctr_ctemps(c, 1);
+            if (lex.value.ok.raw) ctr_ctemps(c, 1);
             ctr_ctemps(c, node->inner.stmt_call.arg_c);
             return ctr_cnode_ex_ok();
         }
         case CTR_ND_IF: {
-            uint32_t cr = ctr_temp(c);
+            uint32_t cr = ctr_rtemp(c);
             ctr_cnode_ex reg = ctr_cnode(c, node->inner.stmt_if.condition, cr);
             if (!reg.is_ok) return reg;
 
@@ -182,16 +259,46 @@ ctr_cnode_ex ctr_cnode(ctr_compiler *c, ctr_node *node, uint32_t t_reg) {
             }
             return ctr_cnode_ex_ok();
         case CTR_ND_RETURN: {
-            uint32_t r = ctr_temp(c);
+            uint32_t r = ctr_rtemp(c);
             ctr_cnode_ex ex = ctr_cnode(c, node->inner.stmt_ret, r);
             if (!ex.is_ok) return ex;
             ctr_cemit(c, ctr_ins_a(CTR_OP_RET, r));
+            return ctr_cnode_ex_ok();
+        }
+        case CTR_ND_FUN: {
+            ctr_upvalue upvals[c->proto.up_c + node->inner.fun.cap_c];
+            memcpy(upvals, c->proto.upvals, c->proto.up_c * sizeof(ctr_upvalue));
+            for (uint32_t i = 0; i < node->inner.fun.cap_c; ++i) {
+                ctr_val *cap = node->inner.fun.captures + i;
+                sf_str name = *(sf_str *)cap->val.dyn;
+                ctr_localmap_ex lex = ctr_localmap_get(&c->lmap, name); // here
+                if (!lex.is_ok)
+                    return ctr_cnode_ex_err((ctr_compile_err){CTR_ERRC_UNKNOWN_LOCAL, {0}, node->line, node->column});
+                if (lex.value.ok.raw)
+                    upvals[c->proto.up_c + i] = (ctr_upvalue){name, CTR_UP_REF, .inner.ref = lex.value.ok.reg, lex.value.ok.frame_o - 1};
+                else {
+                    ctr_cemit(c, ctr_ins_a(CTR_OP_UP_REF, lex.value.ok.reg));
+                    upvals[c->proto.up_c + i] = (ctr_upvalue){name, CTR_UP_REF, .inner.ref = lex.value.ok.reg, .frame_o = -1};
+                }
+            }
+            ctr_compile_ex ex = ctr_cfun(
+                node->inner.fun.block,
+                node->inner.fun.arg_c, node->inner.fun.args,
+                c->proto.up_c + node->inner.fun.cap_c, upvals
+            );
+            if (!ex.is_ok) return ctr_cnode_ex_err(ex.value.err);
+            ctr_val fun = ctr_dnew(CTR_DFUN);
+            *(ctr_proto *)fun.val.dyn = ex.value.ok;
+
+            ctr_valvec_push(&c->proto.constants, fun);
+            ctr_cemit(c, ctr_ins_ab(CTR_OP_LOAD, t_reg, c->proto.constants.count - 1));
+            return ctr_cnode_ex_ok();
         }
         default: return ctr_cnode_ex_err((ctr_compile_err){CTR_ERRC_UNKNOWN, {0}, node->line, node->column});
     }
 }
 
-EXPORT ctr_compile_ex ctr_cproto(sf_str src) {
+ctr_compile_ex ctr_cproto(sf_str src, uint32_t arg_c, ctr_val *args, uint32_t up_c, ctr_upvalue *upvals) {
     ctr_scan_ex scan_ex = ctr_scan(src);
     if (!scan_ex.is_ok)
         return ctr_compile_ex_err((ctr_compile_err){
@@ -208,22 +315,5 @@ EXPORT ctr_compile_ex ctr_cproto(sf_str src) {
             .line = par_ex.value.err.line,
             .column = par_ex.value.err.column,
         });
-    ctr_ast ast = par_ex.value.ok;
-
-    if (ast->tt != CTR_ND_BLOCK)
-        return ctr_compile_ex_err((ctr_compile_err){CTR_ERRC_EXPECTED_BLOCK, {0}, 0, 0});
-
-    ctr_compiler c = {
-        .proto = ctr_proto_new(),
-        .ast = ast,
-        .lmap = ctr_localmap_new(),
-        .locals = 0,
-        .temps = 0, .max_temps = 0,
-    };
-    ctr_valvec_push(&c.proto.constants, (ctr_val){.tt = CTR_TI64, .val.i64 = 0});
-    ctr_valvec_push(&c.proto.constants, (ctr_val){.tt = CTR_TI64, .val.i64 = 1});
-
-    ctr_cnode_ex e = ctr_cnode(&c, c.ast, UINT_MAX);
-    c.proto.reg_c = c.locals + c.max_temps;
-    return e.is_ok ? ctr_compile_ex_ok(c.proto) : ctr_compile_ex_err(e.value.err);
+    return ctr_cfun(par_ex.value.ok, arg_c, args, up_c, upvals);
 }

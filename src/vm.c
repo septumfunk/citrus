@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include "ctr/vm.h"
 #include "ctr/bytecode.h"
+#include "ctr/ctrc.h"
 #include "sf/str.h"
 
 ctr_state *ctr_state_new(void) {
@@ -8,6 +9,7 @@ ctr_state *ctr_state_new(void) {
     *s = (ctr_state){
         .stack = ctr_valvec_new(),
         .protos = ctr_protovec_new(),
+        .global = ctr_dnew(CTR_DOBJ),
     };
     return s;
 }
@@ -15,7 +17,16 @@ ctr_state *ctr_state_new(void) {
 void ctr_state_free(ctr_state *state) {
     ctr_valvec_free(&state->stack);
     ctr_protovec_free(&state->protos);
+    ctr_ddel(state->global);
     free(state);
+}
+
+ctr_compile_ex ctr_compile(ctr_state *state, sf_str src) {
+    ctr_compile_ex ex = ctr_cproto(src, 0, NULL, 1, (ctr_upvalue[]){
+        (ctr_upvalue){sf_lit("_g"), CTR_UP_VAL, .inner.value = ctr_dref(state->global)}
+    });
+    if (!ex.is_ok) return ex;
+    return ctr_compile_ex_ok(ex.value.ok);
 }
 
 sf_str ctr_tostring(ctr_val val) {
@@ -102,6 +113,10 @@ ctr_call_ex ctr_call(ctr_state *state, ctr_proto *proto, const ctr_val *args) {
         LABEL(CTR_OP_LT),
         LABEL(CTR_OP_LE),
 
+        LABEL(CTR_OP_UP_SET),
+        LABEL(CTR_OP_UP_GET),
+        LABEL(CTR_OP_UP_REF),
+
         LABEL(CTR_OP_OBJ_NEW),
         LABEL(CTR_OP_OBJ_SET),
         LABEL(CTR_OP_OBJ_GET),
@@ -119,10 +134,14 @@ ctr_call_ex ctr_call(ctr_state *state, ctr_proto *proto, const ctr_val *args) {
     uint32_t pc = proto->entry;
     ctr_val return_val = CTR_NIL;
 
-    uint32_t stack_o = state->stack_o;
+    state->frames = realloc(state->frames, ++state->frame_c * sizeof(ctr_stackframe));
+    state->frames[state->frame_c - 1] = (ctr_stackframe){
+        state->frame_c == 1 ? 0 : state->frames[state->frame_c - 1].bottom_o + state->frames[state->frame_c - 1].size,
+        proto->reg_c,
+    };
+
     for (uint32_t i = 0; i < proto->reg_c; ++i)
         ctr_valvec_push(&state->stack, CTR_NIL);
-    state->stack_o = state->stack.count - proto->reg_c;
     for (uint32_t i = 0; i < proto->arg_c && args; ++i)
         ctr_set(state, i, args[i]);
 
@@ -157,15 +176,20 @@ ctr_call_ex ctr_call(ctr_state *state, ctr_proto *proto, const ctr_val *args) {
             if (fun.tt != CTR_TDYN || ctr_header(fun)->tt != CTR_DFUN)
                 return call_err(CTR_ERRV_TYPE_MISMATCH, "Expected fun at [%d], found %s.", ctr_iabc_a(ins), ctr_typename(fun).c_str);
 
-            ctr_dfun f = *(ctr_dfun *)fun.val.dyn;
-            ctr_val args[f->arg_c];
-            for (uint32_t i = 0; i < f->arg_c; ++i)
+            ctr_proto f = *(ctr_proto *)fun.val.dyn;
+            ctr_val args[f.arg_c];
+            for (uint32_t i = 0; i < f.arg_c; ++i)
                 args[i] = ctr_get(state, ctr_iabc_c(ins) + i);
 
-            ctr_call_ex ex = ctr_call(state, f, args);
-            if (!ex.is_ok)
-                return ex;
-            ctr_set(state, ctr_iabc_a(ins), ex.value.ok);
+            ctr_call_ex fex = ctr_call(state, &f, args);
+            if (!fex.is_ok)
+                return fex;
+            #ifdef CTR_DEBUG_LOG
+            sf_str ret = ctr_tostring(fex.value.ok);
+            printf("[RET] [Type: %s] %s\n", ctr_typename(fex.value.ok).c_str, ret.c_str);
+            sf_str_free(ret);
+            #endif
+            ctr_set(state, ctr_iabc_a(ins), fex.value.ok);
             DISPATCH();
         }
 
@@ -394,6 +418,33 @@ ctr_call_ex ctr_call(ctr_state *state, ctr_proto *proto, const ctr_val *args) {
             DISPATCH();
         }
 
+        CASE(CTR_OP_UP_SET) {
+            ctr_val v = ctr_get(state, ctr_iab_b(ins));
+            ctr_upvalue *upv = proto->upvals + ctr_iab_a(ins);
+            if (upv->tt == CTR_UP_VAL)
+                upv->inner.value = ctr_dref(v);
+            else ctr_rawset(state, upv->inner.ref, v, (uint32_t)((int64_t)(state->frame_c - 1) + upv->frame_o));
+            DISPATCH();
+        }
+        CASE(CTR_OP_UP_GET) {
+            ctr_upvalue *upv = proto->upvals + ctr_iab_b(ins);
+            if (upv->tt == CTR_UP_VAL)
+                ctr_set(state, ctr_iab_a(ins), ctr_dref(upv->inner.value));
+            else ctr_set(state, ctr_iab_a(ins), ctr_rawget(state, upv->inner.ref, (uint32_t)((int64_t)(state->frame_c - 1) + upv->frame_o)));
+            DISPATCH();
+        }
+        CASE(CTR_OP_UP_REF) {
+            ctr_val v = ctr_get(state, (uint32_t)ctr_ia_a(ins));
+            if (v.tt == CTR_TDYN && ctr_header(v)->tt == CTR_DVAL) {
+                ctr_dref(v);
+                DISPATCH();
+            }
+            ctr_val vref = ctr_dnew(CTR_DVAL);
+            *(ctr_val *)vref.val.dyn = v;
+            ctr_set(state, (uint32_t)ctr_ia_a(ins), vref);
+            DISPATCH();
+        }
+
         CASE(CTR_OP_OBJ_NEW) {
             ctr_val v = ctr_dnew(CTR_DOBJ);
             ctr_set(state, (uint32_t)ctr_ia_a(ins), v);
@@ -461,7 +512,7 @@ ret: {}
         if (v.tt == CTR_TDYN)
             ctr_ddel(v);
     }
-    state->stack_o = stack_o;
+    state->frames = realloc(state->frames, --state->frame_c * sizeof(ctr_stackframe));
     return ctr_call_ex_ok(return_val);
 }
 

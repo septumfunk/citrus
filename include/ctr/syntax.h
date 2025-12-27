@@ -7,8 +7,8 @@
 typedef enum {
     TK_SOF,
     TK_LEFT_PAREN, TK_RIGHT_PAREN, TK_LEFT_BRACE, TK_RIGHT_BRACE,
+    TK_LEFT_BRACKET, TK_RIGHT_BRACKET,
     TK_COMMA, TK_PERIOD, TK_MINUS, TK_PLUS, TK_SEMICOLON, TK_SLASH, TK_ASTERISK,
-    TK_FAT_ARROW,
 
     TK_BANG, TK_NOT_EQUAL,
     TK_EQUAL, TK_DOUBLE_EQUAL,
@@ -71,6 +71,7 @@ typedef enum {
     CTR_ND_CALL,
     CTR_ND_IF,
     CTR_ND_BLOCK,
+    CTR_ND_FUN,
     CTR_ND_RETURN,
 } ctr_nodetype;
 
@@ -99,10 +100,17 @@ typedef struct ctr_node {
             struct ctr_node **args;
             uint32_t arg_c;
         } stmt_call;
-        struct {
+        struct ctr_block {
             struct ctr_node **stmts;
             uint32_t count;
         } block;
+        struct {
+            ctr_val *captures;
+            uint32_t cap_c;
+            ctr_val *args;
+            uint32_t arg_c;
+            struct ctr_node *block;
+        } fun;
     } inner;
 } ctr_node;
 
@@ -122,7 +130,9 @@ typedef struct {
         CTR_ERRP_EXPECTED_CONDITION,
         CTR_ERRP_EXPECTED_BLOCK,
         CTR_ERRP_EXPECTED_STMT,
+        CTR_ERRP_EXPECTED_ARGS,
         CTR_ERRP_UNTERMINATED_ARGS,
+        CTR_ERRP_UNTERMINATED_CAPTURES,
     } tt;
     size_t line, column;
 } ctr_parse_err;

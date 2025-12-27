@@ -11,6 +11,7 @@ typedef struct {
         CTR_ERRC_PARSE_ERR,
 
         CTR_ERRC_EXPECTED_BLOCK,
+        CTR_ERRC_EXPECTED_FUN,
         CTR_ERRC_UNKNOWN_LOCAL,
         CTR_ERRC_UNKNOWN_OPERATION,
         CTR_ERRC_UNUSED_EVALUATION,
@@ -28,6 +29,6 @@ typedef struct {
 #define EXPECTED_E ctr_compile_err
 #include <sf/containers/expected.h>
 /// Compile a ctr_proto from source code.
-EXPORT ctr_compile_ex ctr_cproto(sf_str src);
+EXPORT ctr_compile_ex ctr_cproto(sf_str src, uint32_t arg_c, ctr_val *args, uint32_t up_c, ctr_upvalue *upvals);
 
 #endif // CTRC_H

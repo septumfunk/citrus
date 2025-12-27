@@ -19,12 +19,12 @@ int main(void) {
     fsb.value.ok.flags = SF_BUFFER_GROW;
     sf_buffer_autoins(&fsb.value.ok, ""); // [\0]
 
-    ctr_compile_ex ex = ctr_cproto(sf_ref((char *)fsb.value.ok.ptr));
+    ctr_state *s = ctr_state_new();
+    ctr_compile_ex ex = ctr_compile(s, sf_ref((char *)fsb.value.ok.ptr));
     if (!ex.is_ok) {
         return -1;
     }
 
-    ctr_state *s = ctr_state_new();
     ctr_call_ex ex2 = ctr_call(s, &ex.value.ok, NULL);
     if (!ex2.is_ok) {
         return -1;

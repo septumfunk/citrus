@@ -32,6 +32,10 @@ typedef enum {
     CTR_OP_LT,
     CTR_OP_LE,
 
+    CTR_OP_UP_SET,
+    CTR_OP_UP_GET,
+    CTR_OP_UP_REF,
+
     CTR_OP_OBJ_NEW,
     CTR_OP_OBJ_SET,
     CTR_OP_OBJ_GET,
@@ -94,6 +98,7 @@ typedef enum {
     CTR_DSTR,
     CTR_DOBJ,
     CTR_DFUN,
+    CTR_DVAL,
     CTR_DCOUNT,
 } ctr_dtype;
 /// Dynamic allocation header including size, type, and gc info.
@@ -118,12 +123,26 @@ typedef struct {
 #define SIZE_T uint32_t
 #include <sf/containers/vec.h>
 
+typedef struct {
+    sf_str name;
+    enum {
+        CTR_UP_VAL,
+        CTR_UP_REF,
+    } tt;
+    union {
+        ctr_val value;
+        uint32_t ref;
+    } inner;
+    int32_t frame_o;
+} ctr_upvalue;
+
 /// Function prototype. This is the main unit of bytecode
 /// for the language, and the result of compilation.
 typedef struct {
     ctr_instruction *code;
-    uint32_t code_s, reg_c, arg_c, entry;
+    uint32_t code_s, reg_c, arg_c, up_c, entry;
     ctr_valvec constants;
+    ctr_upvalue *upvals;
 } ctr_proto;
 #define VEC_NAME ctr_protovec
 #define VEC_T ctr_proto *
@@ -153,11 +172,27 @@ static inline ctr_val ctr_dref(ctr_val val) {
     if (dh && !dh->is_const) ++ctr_header(val)->rc;
     return val;
 }
+/// Get an inner value reference if it is a reference.
+static inline ctr_val ctr_dval(ctr_val val) {
+    ctr_dheader *dh = ctr_header(val);
+    if (dh && dh->tt == CTR_DVAL)
+        return *(ctr_val *)val.val.dyn;
+    return val;
+}
 /// Delete a reference to a dynamic object.
 static inline void ctr_ddel(ctr_val val) {
     ctr_dheader *dh = ctr_header(val);
-    if (dh && !dh->is_const && --dh->rc == 0)
+    if (dh && !dh->is_const && --dh->rc == 0) {
+        if (dh->tt == CTR_DSTR && val.val.dyn)
+            ctr_proto_free((ctr_proto *)val.val.dyn);
+        if (dh->tt == CTR_DOBJ && val.val.dyn)
+            ctr_dobj_free((ctr_dobj *)val.val.dyn);
+        if (dh->tt == CTR_DVAL && val.val.dyn)
+            ctr_ddel(*(ctr_val *)val.val.dyn);
+        if (dh->tt == CTR_DFUN && val.val.dyn)
+            ctr_proto_free((ctr_proto *)val.val.dyn);
         free(dh);
+    }
 }
 
 extern const sf_str CTR_TYPE_NAMES[(size_t)CTR_TCOUNT + (size_t)CTR_DCOUNT];
