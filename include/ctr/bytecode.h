@@ -7,17 +7,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// crash team racing
-#define CTR_BYTECODE_HEADER { 'C', 'T', 'R' }
-// The great switch for debug output
-//#define CTR_DEBUG_LOG
+// Define CTR_DBG_LOG to get debug output from the compiler and vm
+//#define CTR_DBG_LOG true
+
+#ifdef CTR_DBG_LOG
+#define ctr_log(lit) printf(lit"\n")
+#define ctr_logf(lit, ...) printf(lit"\n", __VA_ARGS__)
+#else
+#define ctr_log(lit)
+#define ctr_logf(lit, ...)
+#endif
 
 typedef enum {
     CTR_INS_A, // A: i26 (jmp)
     CTR_INS_AB, // A: u8, B: u18 (load)
-    CTR_INS_ABC, // A: u8, B: u9, C: u9
+    CTR_INS_ABC, // A: u8, B: u9, C: u9 (most)
 } ctr_instype;
-typedef uint32_t ctr_operand;
 
 typedef enum {
     CTR_OP_LOAD,
@@ -35,23 +40,27 @@ typedef enum {
     CTR_OP_LT,
     CTR_OP_LE,
 
-    CTR_OP_UP_SET,
-    CTR_OP_UP_GET,
-    CTR_OP_UP_REF,
+    CTR_OP_SETU,
+    CTR_OP_GETU,
+    CTR_OP_REFU,
 
-    CTR_OP_OBJ_NEW,
-    CTR_OP_OBJ_SET,
-    CTR_OP_OBJ_GET,
-
-    CTR_OP_STR_FROM,
-    CTR_OP_STR_ECHO,
-
-    CTR_OP_DBG_DUMP,
+    CTR_OP_SET,
+    CTR_OP_GET,
 
     CTR_OP_UNKNOWN,
     CTR_OP_COUNT,
 } ctr_opcode;
 typedef uint32_t ctr_instruction;
+
+
+typedef enum {
+#define X(prefix, name, string) CTR_ERR##prefix##_##name,
+#include "error.def"
+#undef X
+    CTR_ERR_COUNT
+} ctr_error;
+extern const sf_str CTR_ERR_STRINGS[CTR_ERR_COUNT];
+#define ctr_err_string(err) (CTR_ERR_STRINGS[(err)])
 
 
 #define MASKI(n) ((1U<<(n))-1U)
@@ -77,6 +86,22 @@ typedef uint32_t ctr_instruction;
 #define ctr_iabc_c(i) ((i) & MASKI(9U))
 
 
+#define CTR_DBG_LINE_BITS 16
+#define CTR_DBG_COL_BITS  16
+
+#define CTR_DBG_COL_MASK  ((1u << CTR_DBG_COL_BITS) - 1u)
+#define CTR_DBG_LINE_MASK ((1u << CTR_DBG_LINE_BITS) - 1u)
+
+#define CTR_DBG_ENCODE(line, col) \
+    (((uint32_t)(line) & CTR_DBG_LINE_MASK) << CTR_DBG_COL_BITS | \
+     ((uint32_t)(col)  & CTR_DBG_COL_MASK) )
+
+#define CTR_DBG_LINE(loc) (((loc) >> CTR_DBG_COL_BITS) & CTR_DBG_LINE_MASK)
+#define CTR_DBG_COL(loc)  ((loc) & CTR_DBG_COL_MASK)
+
+typedef uint32_t ctr_dbg;
+
+
 typedef struct {
     ctr_opcode opcode;
     const char *mnemonic;
@@ -89,38 +114,48 @@ typedef enum {
     CTR_TNIL,
     CTR_TF64,
     CTR_TI64,
+    CTR_TBOOL,
     CTR_TDYN,
 
     CTR_TCOUNT,
-} ctr_type;
+} ctr_ptype;
 typedef double ctr_f64;
 typedef int64_t ctr_i64;
+typedef bool ctr_bool;
 typedef void *ctr_dyn;
 
 typedef enum {
     CTR_DSTR,
+    CTR_DERR,
     CTR_DOBJ,
+    CTR_DARRAY,
     CTR_DFUN,
-    CTR_DVAL,
+    CTR_DREF,
+
     CTR_DCOUNT,
 } ctr_dtype;
-/// Dynamic allocation header including size, type, and gc info.
+extern const sf_str CTR_TYPE_NAMES[(size_t)CTR_TCOUNT + (size_t)CTR_DCOUNT];
+
+/// Dynamic allocation header including size, type, and gc info
 typedef struct {
     size_t size;
-    bool is_const;
     ctr_dtype tt;
+    bool is_const;
     uint32_t rc;
 } ctr_dheader;
 
 typedef struct {
-    union ctr_innerval {
+    ctr_ptype tt;
+    union {
         ctr_f64 f64;
         ctr_i64 i64;
+        ctr_bool boolean;
         ctr_dyn dyn;
-    } val;
-    ctr_type tt;
+    };
 } ctr_val;
 #define CTR_NIL (ctr_val){.tt = CTR_TNIL}
+#define CTR_TRUE (ctr_val){.tt = CTR_TBOOL, .boolean = true}
+#define CTR_FALSE (ctr_val){.tt = CTR_TBOOL, .boolean = false}
 #define VEC_NAME ctr_valvec
 #define VEC_T ctr_val
 #define SIZE_T uint32_t
@@ -135,7 +170,7 @@ typedef struct {
     union {
         ctr_val value;
         uint32_t ref;
-    } inner;
+    };
     int32_t frame_o;
 } ctr_upvalue;
 
@@ -144,26 +179,26 @@ struct ctr_call_ex;
 typedef struct ctr_call_ex (*ctr_cfunction)(struct ctr_state *);
 
 /// Function prototype. This is the main unit of bytecode
-/// for the language, and the result of compilation.
+/// for the language, and the result of compilation
 typedef struct {
     enum {
-        CTR_PROTO_BC,
-        CTR_PROTO_CFUN,
+        CTR_FPROTO_BC, // bytecode
+        CTR_FPROTO_C, // c function
     } tt;
     union {
-        ctr_instruction *bc;
+        struct {
+            ctr_instruction *code;
+            ctr_dbg *dbg;
+        };
         ctr_cfunction c_fun;
-    } code;
+    };
     uint32_t code_s, reg_c, arg_c, up_c, entry;
     ctr_valvec constants;
     ctr_upvalue *upvals;
-} ctr_proto;
-#define VEC_NAME ctr_protovec
-#define VEC_T ctr_proto *
-#include <sf/containers/vec.h>
-EXPORT ctr_proto ctr_proto_new(void);
-EXPORT ctr_proto ctr_proto_cfun(ctr_cfunction c_fun, uint32_t arg_c, uint32_t temp_c);
-EXPORT void ctr_proto_free(ctr_proto *proto);
+} ctr_fproto;
+EXPORT ctr_fproto ctr_fproto_new(void);
+EXPORT ctr_fproto ctr_fproto_c(ctr_cfunction c_fun, uint32_t arg_c, uint32_t temp_c);
+EXPORT void ctr_fproto_free(ctr_fproto *proto);
 
 typedef sf_str ctr_dstr;
 
@@ -176,59 +211,50 @@ void _ctr_dobj_cleanup(struct ctr_dobj *obj);
 #define HASH_FN(s) (sf_str_hash(s))
 #define CLEANUP_FN _ctr_dobj_cleanup
 #include <sf/containers/map.h>
-typedef ctr_proto *ctr_dfun;
+typedef ctr_fproto *ctr_dfun;
 
-/// Allocates a dynamic object, a heap allocated object with an information header.
+/// Allocates a dynamic object, a heap allocated object with an information header
 EXPORT ctr_val ctr_dnew(ctr_dtype tt);
-static inline ctr_dheader *ctr_header(ctr_val val) { return val.tt == CTR_TDYN ? (ctr_dheader *)((char *)val.val.dyn - sizeof(ctr_dheader)) : NULL; }
-/// Make a new reference to a dynamic object.
+/// Shorthand for using ctr_dnew and assigning a string value.
+/// Worry not, this duplicates the string passed
+static inline ctr_val ctr_dnewstr(sf_str str) {
+    ctr_val strv = ctr_dnew(CTR_DSTR);
+    *(sf_str *)strv.dyn = sf_str_dup(str);
+    return strv;
+}
+/// Shorthand for using ctr_dnew and assigning a string value.
+/// Worry not, this duplicates the string passed
+static inline ctr_val ctr_dnewerr(sf_str str) {
+    ctr_val strv = ctr_dnew(CTR_DERR);
+    *(sf_str *)strv.dyn = sf_str_dup(str);
+    return strv;
+}
+/// Delete a reference to a dynamic object (decrement ref counter)
+EXPORT void ctr_ddel(ctr_val val);
+/// Return the header pointer of a dynamic value (or NULL)
+static inline ctr_dheader *ctr_header(ctr_val val) {
+    return val.tt == CTR_TDYN ? (ctr_dheader *)((char *)val.dyn - sizeof(ctr_dheader)) : NULL;
+}
+/// Returns whether a value is of the provided dynamic type
+static inline bool ctr_isdtype(ctr_val value, ctr_dtype dtype) {
+    return value.tt == CTR_TDYN && ctr_header(value)->tt == dtype;
+}
+/// Make a new reference to a dynamic object (increment ref counter)
 static inline ctr_val ctr_dref(ctr_val val) {
     ctr_dheader *dh = ctr_header(val);
     if (dh && !dh->is_const) ++ctr_header(val)->rc;
     return val;
 }
-/// Get an inner value reference if it is a reference.
+/// Get an inner value reference if it is a reference
 static inline ctr_val ctr_dval(ctr_val val) {
     ctr_dheader *dh = ctr_header(val);
-    if (dh && dh->tt == CTR_DVAL)
-        return *(ctr_val *)val.val.dyn;
+    if (dh && dh->tt == CTR_DREF)
+        return *(ctr_val *)val.dyn;
     return val;
 }
-/// Delete a reference to a dynamic object.
-static inline void ctr_ddel(ctr_val val) {
-    ctr_dheader *dh = ctr_header(val);
-    if (dh && !dh->is_const && --dh->rc == 0) {
-        if (dh->tt == CTR_DSTR && val.val.dyn)
-            sf_str_free(*(sf_str *)val.val.dyn);
-        if (dh->tt == CTR_DOBJ && val.val.dyn)
-            ctr_dobj_free((ctr_dobj *)val.val.dyn);
-        if (dh->tt == CTR_DVAL && val.val.dyn)
-            ctr_ddel(*(ctr_val *)val.val.dyn);
-        if (dh->tt == CTR_DFUN && val.val.dyn)
-            ctr_proto_free((ctr_proto *)val.val.dyn);
-        free(dh);
-    }
+/// Returns a (static) string denoting the type of a value
+static inline sf_str ctr_typename(ctr_val val) {
+    return val.tt == CTR_TDYN ? CTR_TYPE_NAMES[(int)CTR_TDYN + 1 + ctr_header(val)->tt] : CTR_TYPE_NAMES[val.tt];
 }
-
-extern const sf_str CTR_TYPE_NAMES[(size_t)CTR_TCOUNT + (size_t)CTR_DCOUNT];
-static inline sf_str ctr_typename(ctr_val val) { return val.tt == CTR_TDYN ? CTR_TYPE_NAMES[(int)CTR_TDYN + 1 + ctr_header(val)->tt] : CTR_TYPE_NAMES[val.tt]; }
-
-
-typedef struct {
-    enum {
-        CTR_ERR_UNEXPECTED_EOF,
-        CTR_ERR_UNKNOWN_OP,
-        CTR_ERR_UNKNOWN_TYPE,
-        CTR_ERR_MISSING_ARG,
-        CTR_ERR_STRING_FORMAT,
-    } type;
-    sf_str string;
-} ctr_asm_err;
-#define EXPECTED_NAME ctr_asm_ex
-#define EXPECTED_O ctr_proto
-#define EXPECTED_E ctr_asm_err
-#include <sf/containers/expected.h>
-/// Compile a proto asm file (.csm)
-EXPORT ctr_asm_ex ctr_assemble(const sf_str code);
 
 #endif // BYTECODE_H

@@ -1,6 +1,7 @@
 #include "ctr/syntax.h"
 #include "ctr/bytecode.h"
 #include "sf/str.h"
+#include <stdint.h>
 #include <stdlib.h>
 
 void _ctr_tokenvec_cleanup(ctr_tokenvec *vec) {
@@ -52,15 +53,13 @@ ctr_token ctr_scanstr(ctr_scanner *s) {
     memcpy(str, s->src.c_str + s->cc + 1, len);
     s->cc += len + 1;
     s->current.column += len + 1;
-    ctr_token tok = {
+
+    return (ctr_token){
         TK_STRING,
-        ctr_dnew(CTR_DSTR),
+        ctr_dnewstr(sf_own(str)),
         s->current.line,
         s->current.column,
     };
-    *(sf_str *)tok.value.val.dyn = sf_own(str);
-
-    return tok;
 }
 
 ctr_token ctr_scannum(ctr_scanner *s) {
@@ -86,14 +85,14 @@ ctr_token ctr_scannum(ctr_scanner *s) {
     if (is_number)
         tok = (ctr_token) {
             .tt = TK_NUMBER,
-            .value = (ctr_val){.val.f64 = atof(str), .tt = CTR_TF64},
+            .value = (ctr_val){.f64 = atof(str), .tt = CTR_TF64},
             .line = s->current.line,
             .column = s->current.column,
         };
     else
         tok = (ctr_token) {
             .tt = TK_INTEGER,
-            .value = (ctr_val){.val.i64 = atoll(str), .tt = CTR_TI64},
+            .value = (ctr_val){.i64 = atoll(str), .tt = CTR_TI64},
             .line = s->current.line,
             .column = s->current.column,
         };
@@ -116,23 +115,27 @@ ctr_token ctr_scanidentifier(ctr_scanner *s) {
     s->current.column += len - 1;
 
     ctr_keywords_ex ex = ctr_keywords_get(&s->keywords, sf_ref(str));
-    if (ex.is_ok) return (ctr_token) {
-            .tt = ex.value.ok,
-            .value = CTR_NIL,
+    if (ex.is_ok) {
+        ctr_val value = CTR_NIL;
+        if (ex.ok == TK_TRUE)
+            value = CTR_TRUE;
+        if (ex.ok == TK_FALSE)
+            value = CTR_FALSE;
+        return (ctr_token) {
+            .tt = ex.ok,
+            .value = value,
             .line = s->current.line,
             .column = s->current.line,
         };
-    else {
+    } else {
         char *s2 = calloc(1, len + 1);
         memcpy(s2, str, len);
-        ctr_token tok = {
+        return (ctr_token){
             TK_IDENTIFIER,
-            ctr_dnew(CTR_DSTR),
+            ctr_dnewstr(sf_own(s2)),
             s->current.line,
             s->current.column,
         };
-        *(sf_str *)tok.value.val.dyn = sf_own(s2);
-        return tok;
     }
 }
 
@@ -144,7 +147,7 @@ ctr_scan_ex ctr_scan(sf_str src) {
         .cc = 0,
         .keywords = ctr_keywords_new(),
     };
-    enum ctr_scan_errt eval = CTR_ERRS_UNEXPECTED_TOKEN;
+    ctr_error eval = CTR_ERRP_UNEXPECTED_TOKEN;
 
     ctr_keywords_set(&s.keywords, sf_lit("and"), TK_AND);
     ctr_keywords_set(&s.keywords, sf_lit("or"), TK_OR);
@@ -206,7 +209,7 @@ ctr_scan_ex ctr_scan(sf_str src) {
             case '"': {
                 s.current = ctr_scanstr(&s);
                 if (s.current.tt != TK_STRING) {
-                    eval = CTR_ERRS_UNTERMINATED_STR;
+                    eval = CTR_ERRP_UNTERMINATED_STR;
                     goto err;
                 }
                 ctr_tokenvec_push(&tks, s.current);
@@ -227,7 +230,7 @@ ctr_scan_ex ctr_scan(sf_str src) {
                 if (ctr_isnumber(c) || (c == '-' && ctr_isnumber(s.src.c_str[s.cc + 1]))) { // Number
                     s.current = ctr_scannum(&s);
                     if (s.current.tt != TK_NUMBER && s.current.tt != TK_INTEGER) {
-                        eval = CTR_ERRS_NUMBER_FORMAT;
+                        eval = CTR_ERRP_NUMBER_FORMAT;
                         goto err;
                     }
                     ctr_tokenvec_push(&tks, s.current);
@@ -265,62 +268,62 @@ typedef struct { ctr_token *tok; } ctr_parser;
 void ctr_node_free(ctr_node *tree) {
     switch (tree->tt) {
         case CTR_ND_BINARY:
-            ctr_node_free(tree->inner.binary.left);
-            ctr_node_free(tree->inner.binary.right);
+            ctr_node_free(tree->n_binary.left);
+            ctr_node_free(tree->n_binary.right);
             break;
         case CTR_ND_RETURN:
-            ctr_node_free(tree->inner.stmt_ret);
+            ctr_node_free(tree->n_return);
             break;
         case CTR_ND_IDENTIFIER:
         case CTR_ND_LITERAL:
-            ctr_ddel(tree->inner.identifier);
+            ctr_ddel(tree->n_identifier);
             break;
         case CTR_ND_LET:
-            ctr_ddel(tree->inner.stmt_let.name);
-            ctr_node_free(tree->inner.stmt_let.value);
+            ctr_ddel(tree->n_let.name);
+            ctr_node_free(tree->n_let.value);
             break;
         case CTR_ND_ASSIGN:
-            ctr_ddel(tree->inner.stmt_assign.name);
-            ctr_node_free(tree->inner.stmt_assign.value);
+            ctr_ddel(tree->n_assign.name);
+            ctr_node_free(tree->n_assign.value);
             break;
         case CTR_ND_CALL:
-            ctr_ddel(tree->inner.stmt_call.name);
-            if (tree->inner.stmt_call.args) {
-                for (size_t i = 0; i < tree->inner.stmt_call.arg_c; ++i)
-                    ctr_node_free(tree->inner.stmt_call.args[i]);
-                free(tree->inner.stmt_call.args);
+            ctr_ddel(tree->n_call.name);
+            if (tree->n_call.args) {
+                for (size_t i = 0; i < tree->n_call.arg_c; ++i)
+                    ctr_node_free(tree->n_call.args[i]);
+                free(tree->n_call.args);
             }
             break;
         case CTR_ND_IF:
-            ctr_node_free(tree->inner.stmt_if.condition);
-            ctr_node_free(tree->inner.stmt_if.then_node);
-            if (tree->inner.stmt_if.else_node)
-                ctr_node_free(tree->inner.stmt_if.else_node);
+            ctr_node_free(tree->n_if.condition);
+            ctr_node_free(tree->n_if.then_node);
+            if (tree->n_if.else_node)
+                ctr_node_free(tree->n_if.else_node);
             break;
         case CTR_ND_BLOCK:
-            if (tree->inner.block.stmts) {
-                for (uint32_t i = 0; i < tree->inner.block.count; ++i)
-                    ctr_node_free(tree->inner.block.stmts[i]);
-                free(tree->inner.block.stmts);
+            if (tree->n_block.stmts) {
+                for (uint32_t i = 0; i < tree->n_block.count; ++i)
+                    ctr_node_free(tree->n_block.stmts[i]);
+                free(tree->n_block.stmts);
             }
             break;
         case CTR_ND_FUN:
-            if (tree->inner.fun.captures) {
-                for (uint32_t i = 0; i < tree->inner.fun.cap_c; ++i)
-                    ctr_ddel(tree->inner.fun.captures[i]);
-                free(tree->inner.fun.captures);
+            if (tree->n_fun.captures) {
+                for (uint32_t i = 0; i < tree->n_fun.cap_c; ++i)
+                    ctr_ddel(tree->n_fun.captures[i]);
+                free(tree->n_fun.captures);
             }
-            if (tree->inner.fun.args) {
-                for (uint32_t i = 0; i < tree->inner.fun.arg_c; ++i)
-                    ctr_ddel(tree->inner.fun.args[i]);
-                free(tree->inner.fun.args);
+            if (tree->n_fun.args) {
+                for (uint32_t i = 0; i < tree->n_fun.arg_c; ++i)
+                    ctr_ddel(tree->n_fun.args[i]);
+                free(tree->n_fun.args);
             }
-            if (tree->inner.fun.block)
-                ctr_node_free(tree->inner.fun.block);
+            if (tree->n_fun.block)
+                ctr_node_free(tree->n_fun.block);
             break;
         case CTR_ND_WHILE:
-            ctr_node_free(tree->inner.stmt_while.condition);
-            ctr_node_free(tree->inner.stmt_while.block);
+            ctr_node_free(tree->n_while.condition);
+            ctr_node_free(tree->n_while.block);
             break;
     }
     free(tree);
@@ -340,9 +343,13 @@ size_t ctr_precedence(ctr_tokentype tt) {
     }
 }
 bool ctr_niscondition(ctr_node *node) {
+    if (node->tt == CTR_ND_IDENTIFIER ||
+        node->tt == CTR_ND_CALL ||
+       (node->tt == CTR_ND_LITERAL && node->n_literal.tt == CTR_TBOOL))
+        return true;
     if (node->tt != CTR_ND_BINARY)
         return false;
-    switch (node->inner.binary.tt) {
+    switch (node->n_binary.op) {
         case TK_OR: case TK_AND: case TK_DOUBLE_EQUAL: case TK_NOT_EQUAL:
         case TK_LESS: case TK_LESS_EQUAL: case TK_GREATER: case TK_GREATER_EQUAL:
             return true;
@@ -357,38 +364,41 @@ static inline bool ctr_parpeek(ctr_parser *p, ctr_tokentype match) {
     return true;
 }
 
-ctr_parse_ex ctr_parprim(ctr_parser *p);
-ctr_parse_ex ctr_parbin(ctr_parser *p, size_t prec);
-ctr_parse_ex ctr_parif(ctr_parser *p);
-ctr_parse_ex ctr_parlet(ctr_parser *p);
-ctr_parse_ex ctr_parassign(ctr_parser *p);
-ctr_parse_ex ctr_parcall(ctr_parser *p);
-ctr_parse_ex ctr_parblock(ctr_parser *p);
-ctr_parse_ex ctr_parfun(ctr_parser *p);
-ctr_parse_ex ctr_parwhile(ctr_parser *p);
-ctr_parse_ex ctr_parreturn(ctr_parser *p);
-ctr_parse_ex ctr_parstmt(ctr_parser *p);
+// Convenience err macro
+#define ctr_perr(type) ctr_parse_ex_err((ctr_parse_err){(type), p->tok->line, p->tok->column})
 
-ctr_parse_ex ctr_parprim(ctr_parser *p) {
+ctr_parse_ex ctr_pprimary(ctr_parser *p);
+ctr_parse_ex ctr_pexpr(ctr_parser *p, size_t prec);
+ctr_parse_ex ctr_pif(ctr_parser *p);
+ctr_parse_ex ctr_plet(ctr_parser *p);
+ctr_parse_ex ctr_passign(ctr_parser *p);
+ctr_parse_ex ctr_pcall(ctr_parser *p);
+ctr_parse_ex ctr_pblock(ctr_parser *p);
+ctr_parse_ex ctr_pfun(ctr_parser *p);
+ctr_parse_ex ctr_pwhile(ctr_parser *p);
+ctr_parse_ex ctr_preturn(ctr_parser *p);
+ctr_parse_ex ctr_pstmt(ctr_parser *p);
+
+ctr_parse_ex ctr_pprimary(ctr_parser *p) {
     switch (p->tok->tt) {
         case TK_INTEGER: case TK_NUMBER: case TK_STRING: case TK_TRUE: case TK_FALSE: case TK_NIL: {
             ctr_node *n = malloc(sizeof(ctr_node));
             *n = (ctr_node){
                 p->tok->tt == TK_IDENTIFIER ? CTR_ND_IDENTIFIER : CTR_ND_LITERAL,
                 p->tok->line, p->tok->column,
-                .inner = (union ctr_ninner){.literal = ctr_dref(p->tok->value)},
+                .n_literal = ctr_dref(p->tok->value),
             };
             ++p->tok;
             return ctr_parse_ex_ok(n);
         }
         case TK_LEFT_BRACKET: {
-            ctr_parse_ex fex = ctr_parfun(p);
+            ctr_parse_ex fex = ctr_pfun(p);
             if (!fex.is_ok) return fex;
             return fex;
         }
         case TK_IDENTIFIER: {
             if ((p->tok + 1)->tt == TK_LEFT_PAREN) { // Call
-                ctr_parse_ex cex = ctr_parcall(p);
+                ctr_parse_ex cex = ctr_pcall(p);
                 if (!cex.is_ok) return cex;
                 return cex;
             } else { // Identifier
@@ -396,7 +406,7 @@ ctr_parse_ex ctr_parprim(ctr_parser *p) {
                 *n = (ctr_node){
                     p->tok->tt == TK_IDENTIFIER ? CTR_ND_IDENTIFIER : CTR_ND_LITERAL,
                     p->tok->line, p->tok->column,
-                    .inner = (union ctr_ninner){.identifier = ctr_dref(p->tok->value)},
+                    .n_identifier = ctr_dref(p->tok->value),
                 };
                 ++p->tok;
                 return ctr_parse_ex_ok(n);
@@ -405,23 +415,23 @@ ctr_parse_ex ctr_parprim(ctr_parser *p) {
         }
         case TK_LEFT_PAREN: {
             ++p->tok;
-            ctr_parse_ex ex = ctr_parbin(p, 0);
+            ctr_parse_ex ex = ctr_pexpr(p, 0);
             if (!ex.is_ok) return ex;
             if (p->tok->tt != TK_RIGHT_PAREN)
-                return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_RPAREN, p->tok->line, p->tok->column});
+                return ctr_perr(CTR_ERRP_EXPECTED_RPAREN);
             ++p->tok;
-            return ctr_parse_ex_ok(ex.value.ok);
+            return ctr_parse_ex_ok(ex.ok);
         }
         default:
-            return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_EXPRESSION, p->tok->line, p->tok->column});
+            return ctr_perr(CTR_ERRP_EXPECTED_EXPRESSION);
     }
 }
 
-ctr_parse_ex ctr_parbin(ctr_parser *p, size_t prec) {
-    ctr_parse_ex ex = ctr_parprim(p);
+ctr_parse_ex ctr_pexpr(ctr_parser *p, size_t prec) {
+    ctr_parse_ex ex = ctr_pprimary(p);
     if (!ex.is_ok) return ex;
 
-    ctr_node *left = ex.value.ok;
+    ctr_node *left = ex.ok;
     while (true) {
         ctr_token *op = p->tok;
         size_t op_prec = ctr_precedence(op->tt);
@@ -429,7 +439,7 @@ ctr_parse_ex ctr_parbin(ctr_parser *p, size_t prec) {
             break;
         ++p->tok;
 
-        ex = ctr_parbin(p, op_prec + 1);
+        ex = ctr_pexpr(p, op_prec + 1);
         if (!ex.is_ok) {
             ctr_node_free(left);
             return ex;
@@ -438,10 +448,10 @@ ctr_parse_ex ctr_parbin(ctr_parser *p, size_t prec) {
         *bin = (ctr_node){
             .tt = CTR_ND_BINARY,
             .line = op->line, .column = op->column,
-            .inner.binary = {
-                .tt = op->tt,
+            .n_binary = {
+                .op = op->tt,
                 .left = left,
-                .right = ex.value.ok,
+                .right = ex.ok,
             },
         };
         left = bin;
@@ -449,38 +459,38 @@ ctr_parse_ex ctr_parbin(ctr_parser *p, size_t prec) {
     return ctr_parse_ex_ok(left);
 }
 
-ctr_parse_ex ctr_parif(ctr_parser *p) {
+ctr_parse_ex ctr_pif(ctr_parser *p) {
     ctr_token *tk_if = p->tok++;
-    ctr_parse_ex cex = ctr_parbin(p, 0);
+    ctr_parse_ex cex = ctr_pexpr(p, 0);
     if (!cex.is_ok) return cex;
-    if (cex.value.ok->tt != CTR_ND_BINARY || !ctr_niscondition(cex.value.ok)) {
-        size_t line = cex.value.ok->line;
-        size_t column = cex.value.ok->column;
-        ctr_node_free(cex.value.ok);
+    if (!ctr_niscondition(cex.ok)) {
+        uint16_t line = cex.ok->line;
+        uint16_t column = cex.ok->column;
+        ctr_node_free(cex.ok);
         return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_CONDITION, line, column});
     }
 
     if (p->tok->tt != TK_LEFT_BRACE) {
-        ctr_node_free(cex.value.ok);
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_BLOCK, p->tok->line, p->tok->column});
+        ctr_node_free(cex.ok);
+        return ctr_perr(CTR_ERRP_EXPECTED_BLOCK);
     }
-    ctr_parse_ex tex = ctr_parblock(p);
+    ctr_parse_ex tex = ctr_pblock(p);
     if (!tex.is_ok) {
-        ctr_node_free(cex.value.ok);
+        ctr_node_free(cex.ok);
         return tex;
     }
     ctr_parse_ex eex = (ctr_parse_ex){.is_ok = false};
     if (p->tok->tt == TK_ELSE) {
         ++p->tok;
         if (p->tok->tt != TK_LEFT_BRACE) {
-            ctr_node_free(cex.value.ok);
-            ctr_node_free(tex.value.ok);
-            return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_BLOCK, p->tok->line, p->tok->column});
+            ctr_node_free(cex.ok);
+            ctr_node_free(tex.ok);
+            return ctr_perr(CTR_ERRP_EXPECTED_BLOCK);
         }
-        eex = ctr_parblock(p);
+        eex = ctr_pblock(p);
         if (!eex.is_ok) {
-            ctr_node_free(cex.value.ok);
-            ctr_node_free(tex.value.ok);
+            ctr_node_free(cex.ok);
+            ctr_node_free(tex.ok);
             return eex;
         }
     }
@@ -489,31 +499,32 @@ ctr_parse_ex ctr_parif(ctr_parser *p) {
     *n_if = (ctr_node){
         .tt = CTR_ND_IF,
         .line = tk_if->line, .column = tk_if->column,
-        .inner.stmt_if = {
-            .condition = cex.value.ok,
-            .then_node = tex.value.ok,
-            .else_node = eex.is_ok ? eex.value.ok : NULL,
+        .n_if = {
+            .condition = cex.ok,
+            .then_node = tex.ok,
+            .else_node = eex.is_ok ? eex.ok : NULL,
         },
     };
     return ctr_parse_ex_ok(n_if);
 }
 
-ctr_parse_ex ctr_parlet(ctr_parser *p) {
+ctr_parse_ex ctr_plet(ctr_parser *p) {
     ctr_token *let = p->tok++;
 
     if (p->tok->tt != TK_IDENTIFIER)
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_IDENTIFIER, p->tok->line, p->tok->column});
+        return ctr_perr(CTR_ERRP_EXPECTED_IDENTIFIER);
     ctr_token *name = p->tok++;
 
     if (p->tok->tt != TK_EQUAL)
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_EQUAL, p->tok->line, p->tok->column});
+        return ctr_perr(CTR_ERRP_EXPECTED_EQUAL);
     ++p->tok;
 
-    ctr_parse_ex vex = ctr_parbin(p, 0);
+    ctr_parse_ex vex = ctr_pexpr(p, 0);
     if (!vex.is_ok) return vex;
     if (p->tok->tt != TK_SEMICOLON) {
-        ctr_node_free(vex.value.ok);
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_SEMICOLON, p->tok->line, p->tok->column});
+        --p->tok;
+        ctr_node_free(vex.ok);
+        return ctr_perr(CTR_ERRP_EXPECTED_SEMICOLON);
     }
     ++p->tok;
 
@@ -521,28 +532,29 @@ ctr_parse_ex ctr_parlet(ctr_parser *p) {
     *n_let = (ctr_node){
         .tt = CTR_ND_LET,
         .line = let->line, .column = let->column,
-        .inner.stmt_let = {
+        .n_let = {
             .name = ctr_dref(name->value),
-            .value = vex.value.ok,
+            .value = vex.ok,
         }
     };
     return ctr_parse_ex_ok(n_let);
 }
 
-ctr_parse_ex ctr_parassign(ctr_parser *p) {
+ctr_parse_ex ctr_passign(ctr_parser *p) {
     if (p->tok->tt != TK_IDENTIFIER)
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_IDENTIFIER, p->tok->line, p->tok->column});
+        return ctr_perr(CTR_ERRP_EXPECTED_IDENTIFIER);
     ctr_token *name = p->tok++;
 
     if (p->tok->tt != TK_EQUAL)
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_EQUAL, p->tok->line, p->tok->column});
+        return ctr_perr(CTR_ERRP_EXPECTED_EQUAL);
     ++p->tok;
 
-    ctr_parse_ex vex = ctr_parbin(p, 0);
+    ctr_parse_ex vex = ctr_pexpr(p, 0);
     if (!vex.is_ok) return vex;
     if (p->tok->tt != TK_SEMICOLON) {
-        ctr_node_free(vex.value.ok);
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_SEMICOLON, p->tok->line, p->tok->column});
+        ctr_node_free(vex.ok);
+        --p->tok;
+        return ctr_perr(CTR_ERRP_EXPECTED_SEMICOLON);
     }
     ++p->tok;
 
@@ -550,28 +562,28 @@ ctr_parse_ex ctr_parassign(ctr_parser *p) {
     *n_assign = (ctr_node){
         .tt = CTR_ND_ASSIGN,
         .line = name->line, .column = name->column,
-        .inner.stmt_assign = {
+        .n_assign = {
             .name = ctr_dref(name->value),
-            .value = vex.value.ok,
+            .value = vex.ok,
         }
     };
     return ctr_parse_ex_ok(n_assign);
 }
 
-ctr_parse_ex ctr_parcall(ctr_parser *p) {
+ctr_parse_ex ctr_pcall(ctr_parser *p) {
     if (p->tok->tt != TK_IDENTIFIER)
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_IDENTIFIER, p->tok->line, p->tok->column});
+        return ctr_perr(CTR_ERRP_EXPECTED_IDENTIFIER);
     ctr_token *name = p->tok++;
 
     if (p->tok->tt != TK_LEFT_PAREN)
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_LPAREN, p->tok->line, p->tok->column});
+        return ctr_perr(CTR_ERRP_EXPECTED_LPAREN);
     ++p->tok;
 
     ctr_node *n_call = malloc(sizeof(ctr_node));
     *n_call = (ctr_node){
         .tt = CTR_ND_CALL,
         .line = name->line, .column = name->column,
-        .inner.stmt_call = {
+        .n_call = {
             .name = ctr_dref(name->value),
             .args = NULL,
             .arg_c = 0,
@@ -579,16 +591,16 @@ ctr_parse_ex ctr_parcall(ctr_parser *p) {
     };
 
     while (p->tok->tt != TK_RIGHT_PAREN && p->tok->tt != TK_EOF) {
-        ctr_parse_ex arg = ctr_parbin(p, 0);
+        ctr_parse_ex arg = ctr_pexpr(p, 0);
         if (!arg.is_ok) {
             ctr_node_free(n_call);
             return arg;
         }
-        n_call->inner.stmt_call.args = realloc(n_call->inner.stmt_call.args, ++n_call->inner.stmt_call.arg_c * sizeof(ctr_node *));
-        n_call->inner.stmt_call.args[n_call->inner.stmt_call.arg_c - 1] = arg.value.ok;
+        n_call->n_call.args = realloc(n_call->n_call.args, ++n_call->n_call.arg_c * sizeof(ctr_node *));
+        n_call->n_call.args[n_call->n_call.arg_c - 1] = arg.ok;
         if (p->tok->tt != TK_COMMA && p->tok->tt != TK_RIGHT_PAREN) {
             ctr_node_free(n_call);
-            return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_UNTERMINATED_ARGS, p->tok->line, p->tok->column});
+            return ctr_perr(CTR_ERRP_UNTERMINATED_ARGS);
         }
         if (p->tok->tt == TK_COMMA) ++p->tok;
     }
@@ -597,12 +609,12 @@ ctr_parse_ex ctr_parcall(ctr_parser *p) {
     return ctr_parse_ex_ok(n_call);
 }
 
-ctr_parse_ex ctr_parblock(ctr_parser *p) {
+ctr_parse_ex ctr_pblock(ctr_parser *p) {
     ctr_node *n_block = malloc(sizeof(ctr_node));
     *n_block = (ctr_node){
         .tt = CTR_ND_BLOCK,
         .line = p->tok->line, .column = p->tok->column,
-        .inner.block = {
+        .n_block = {
             .stmts = NULL,
             .count = 0,
         },
@@ -610,31 +622,31 @@ ctr_parse_ex ctr_parblock(ctr_parser *p) {
     ctr_tokentype st = p->tok->tt;
     ++p->tok;
     while (p->tok->tt != TK_RIGHT_BRACE && p->tok->tt != TK_EOF) {
-        ctr_parse_ex sex = ctr_parstmt(p); // HHAHAHAHHAHHAHAHHAH
+        ctr_parse_ex sex = ctr_pstmt(p); // HHAHAHAHHAHHAHAHHAH
         if (!sex.is_ok) {
             ctr_node_free(n_block);
             return sex;
         }
-        n_block->inner.block.stmts = realloc(n_block->inner.block.stmts, ++n_block->inner.block.count * sizeof(ctr_node *));
-        n_block->inner.block.stmts[n_block->inner.block.count - 1] = sex.value.ok;
+        n_block->n_block.stmts = realloc(n_block->n_block.stmts, ++n_block->n_block.count * sizeof(ctr_node *));
+        n_block->n_block.stmts[n_block->n_block.count - 1] = sex.ok;
     }
 
     if (st == TK_LEFT_BRACE && p->tok->tt != TK_RIGHT_BRACE) {
         ctr_node_free(n_block);
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_RBRACE, p->tok->line, p->tok->column});
+        return ctr_perr(CTR_ERRP_EXPECTED_RBRACE);
     }
     ++p->tok;
 
     return ctr_parse_ex_ok(n_block);
 }
 
-ctr_parse_ex ctr_parfun(ctr_parser *p) {
+ctr_parse_ex ctr_pfun(ctr_parser *p) {
     ++p->tok; // Consume [
     ctr_node *n_fun = malloc(sizeof(ctr_node));
     *n_fun = (ctr_node){
         .tt = CTR_ND_FUN,
         .line = p->tok->line, .column = p->tok->column,
-        .inner.fun = {
+        .n_fun = {
             .captures = NULL,
             .cap_c = 0,
             .args = NULL,
@@ -643,130 +655,140 @@ ctr_parse_ex ctr_parfun(ctr_parser *p) {
     };
 
     while (p->tok->tt != TK_RIGHT_BRACKET && p->tok->tt != TK_EOF) {
-        if (p->tok->tt != TK_IDENTIFIER)
-            return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_IDENTIFIER, p->tok->line, p->tok->column});
-        n_fun->inner.fun.captures = realloc(n_fun->inner.fun.captures, (++n_fun->inner.fun.cap_c) * sizeof(ctr_val));
-        n_fun->inner.fun.captures[n_fun->inner.fun.cap_c - 1] = ctr_dref(p->tok->value);
+        if (p->tok->tt != TK_IDENTIFIER) {
+            ctr_node_free(n_fun);
+            return ctr_perr(CTR_ERRP_EXPECTED_IDENTIFIER);
+        }
+        n_fun->n_fun.captures = realloc(n_fun->n_fun.captures, (++n_fun->n_fun.cap_c) * sizeof(ctr_val));
+        n_fun->n_fun.captures[n_fun->n_fun.cap_c - 1] = ctr_dref(p->tok->value);
         ++p->tok;
 
         if (p->tok->tt != TK_COMMA && p->tok->tt != TK_RIGHT_BRACKET) {
             ctr_node_free(n_fun);
-            return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_UNTERMINATED_CAPTURES, p->tok->line, p->tok->column});
+            return ctr_perr(CTR_ERRP_UNTERMINATED_CAPTURES);
         }
         if (p->tok->tt == TK_COMMA) ++p->tok;
     }
     ++p->tok;
 
-    if (p->tok->tt != TK_LEFT_PAREN)
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_ARGS, p->tok->line, p->tok->column});
+    if (p->tok->tt != TK_LEFT_PAREN) {
+        ctr_node_free(n_fun);
+        return ctr_perr(CTR_ERRP_EXPECTED_ARGS);
+    }
     ++p->tok;
     while (p->tok->tt != TK_RIGHT_PAREN && p->tok->tt != TK_EOF) {
-        if (p->tok->tt != TK_IDENTIFIER)
-            return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_IDENTIFIER, p->tok->line, p->tok->column});
-        n_fun->inner.fun.captures = realloc(n_fun->inner.fun.captures, ++n_fun->inner.fun.cap_c * sizeof(ctr_val *));
-        n_fun->inner.fun.captures[n_fun->inner.fun.cap_c - 1] = ctr_dref(p->tok->value);
+        if (p->tok->tt != TK_IDENTIFIER) {
+            ctr_node_free(n_fun);
+            return ctr_perr(CTR_ERRP_EXPECTED_IDENTIFIER);
+        }
+        n_fun->n_fun.args = realloc(n_fun->n_fun.args, ++n_fun->n_fun.arg_c * sizeof(ctr_val *));
+        n_fun->n_fun.args[n_fun->n_fun.arg_c - 1] = ctr_dref(p->tok->value);
         ++p->tok;
 
         if (p->tok->tt != TK_COMMA && p->tok->tt != TK_RIGHT_PAREN) {
             ctr_node_free(n_fun);
-            return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_UNTERMINATED_CAPTURES, p->tok->line, p->tok->column});
+            return ctr_perr(CTR_ERRP_UNTERMINATED_ARGS);
         }
         if (p->tok->tt == TK_COMMA) ++p->tok;
     }
     ++p->tok;
 
-    if (p->tok->tt != TK_LEFT_BRACE)
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_BLOCK, p->tok->line, p->tok->column});
-    ctr_parse_ex bex = ctr_parblock(p);
+    if (p->tok->tt != TK_LEFT_BRACE) {
+        ctr_node_free(n_fun);
+        return ctr_perr(CTR_ERRP_EXPECTED_BLOCK);
+    }
+    ctr_parse_ex bex = ctr_pblock(p);
     if (!bex.is_ok) {
         ctr_node_free(n_fun);
         return bex;
     }
-    n_fun->inner.fun.block = bex.value.ok;
+    n_fun->n_fun.block = bex.ok;
 
     return ctr_parse_ex_ok(n_fun);
 }
 
-ctr_parse_ex ctr_parwhile(ctr_parser *p) {
+ctr_parse_ex ctr_pwhile(ctr_parser *p) {
     ++p->tok;
     ctr_node *n_while = malloc(sizeof(ctr_node));
     *n_while = (ctr_node){
         .tt = CTR_ND_WHILE,
         .line = p->tok->line, .column = p->tok->column,
-        .inner.stmt_while = {
+        .n_while = {
             .condition = NULL,
             .block = NULL,
         },
     };
 
-    ctr_parse_ex ex = ctr_parbin(p, 0);
+    ctr_parse_ex ex = ctr_pexpr(p, 0);
     if (!ex.is_ok) {
         ctr_node_free(n_while);
         return ex;
     }
 
-    n_while->inner.stmt_while.condition = ex.value.ok;
-    if (ex.value.ok->tt != CTR_ND_BINARY || !ctr_niscondition(ex.value.ok)) {
-        size_t line = ex.value.ok->line;
-        size_t column = ex.value.ok->column;
-        ctr_node_free(n_while);
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_CONDITION, line, column});
+    n_while->n_while.condition = ex.ok;
+    if (ex.ok->tt != CTR_ND_BINARY || !ctr_niscondition(ex.ok)) {
+        uint16_t line = ex.ok->line;
+        uint16_t column = ex.ok->column;
+        ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_CONDITION, line, column});
     }
 
     if (p->tok->tt != TK_LEFT_BRACE) {
         ctr_node_free(n_while);
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_BLOCK, p->tok->line, p->tok->column});
+        return ctr_perr(CTR_ERRP_EXPECTED_BLOCK);
     }
 
-    ex = ctr_parblock(p);
+    ex = ctr_pblock(p);
     if (!ex.is_ok) {
         ctr_node_free(n_while);
         return ex;
     }
-    n_while->inner.stmt_while.block = ex.value.ok;
+    n_while->n_while.block = ex.ok;
 
     return ctr_parse_ex_ok(n_while);
 }
 
-ctr_parse_ex ctr_parreturn(ctr_parser *p) {
+ctr_parse_ex ctr_preturn(ctr_parser *p) {
     ++p->tok;
-    ctr_parse_ex expr = ctr_parbin(p, 0);
+    ctr_parse_ex expr = ctr_pexpr(p, 0);
     if (!expr.is_ok) return expr;
     if (p->tok->tt != TK_SEMICOLON) {
-        ctr_node_free(expr.value.ok);
-        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_SEMICOLON, p->tok->line, p->tok->column});
+        --p->tok;
+        ctr_node_free(expr.ok);
+        return ctr_perr(CTR_ERRP_EXPECTED_SEMICOLON);
     }
     ++p->tok;
 
-    ctr_node *n_ret = malloc(sizeof(ctr_node));
-    *n_ret = (ctr_node){
+    ctr_node *n_return = malloc(sizeof(ctr_node));
+    *n_return = (ctr_node){
         .tt = CTR_ND_RETURN,
         .line = (p->tok - 1)->line, .column = (p->tok - 1)->column,
-        .inner.stmt_ret = expr.value.ok,
+        .n_return = expr.ok,
     };
-    return ctr_parse_ex_ok(n_ret);
+    return ctr_parse_ex_ok(n_return);
 }
 
-ctr_parse_ex ctr_parstmt(ctr_parser *p) {
+ctr_parse_ex ctr_pstmt(ctr_parser *p) {
     switch (p->tok->tt) {
-        case TK_IF: return ctr_parif(p);
-        case TK_LET: return ctr_parlet(p);
-        case TK_WHILE: return ctr_parwhile(p);
-        case TK_LEFT_BRACE: case TK_SOF: return ctr_parblock(p);
-        case TK_RETURN: return ctr_parreturn(p);
+        case TK_IF: return ctr_pif(p);
+        case TK_LET: return ctr_plet(p);
+        case TK_WHILE: return ctr_pwhile(p);
+        case TK_LEFT_BRACE: case TK_SOF: return ctr_pblock(p);
+        case TK_RETURN: return ctr_preturn(p);
         case TK_IDENTIFIER:
             switch ((p->tok + 1)->tt) {
-                case TK_EQUAL: return ctr_parassign(p);
+                case TK_EQUAL: return ctr_passign(p);
                 default: {
-                    ctr_parse_ex id = ctr_parbin(p, 0);
+                    ctr_parse_ex id = ctr_pexpr(p, 0);
                     if (!id.is_ok) return id;
-                    if (p->tok->tt != TK_SEMICOLON)
-                        return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_SEMICOLON, p->tok->line, p->tok->column});
+                    if (p->tok->tt != TK_SEMICOLON) {
+                        --p->tok;
+                        return ctr_perr(CTR_ERRP_EXPECTED_SEMICOLON);
+                    }
                     ++p->tok;
                     return id;
                 }
             }
-        default: return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_EXPECTED_STMT, p->tok->line, p->tok->column});
+        default: return ctr_perr(CTR_ERRP_EXPECTED_STMT);
     };
 }
 
@@ -774,5 +796,5 @@ ctr_parse_ex ctr_parse(ctr_tokenvec *tokens) {
     if (tokens->count == 0)
         return ctr_parse_ex_err((ctr_parse_err){CTR_ERRP_NO_TOKENS, 0, 0});
     ctr_parser p = { tokens->data };
-    return ctr_parstmt(&p);
+    return ctr_pstmt(&p);
 }

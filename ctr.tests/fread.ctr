@@ -1,0 +1,11 @@
+let f = panic(fread("baller.txt"));
+println(f);
+let x = [crap]() { return 1; };
+
+if f == "baller" {
+    let f = "fucker";
+    println(f);
+}
+if f != "baller" {
+    panic(err(f));
+}

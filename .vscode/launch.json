@@ -2,10 +2,10 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Debug Test",
+      "name": "Debug CLI",
       "request": "launch",
-      "program": "${workspaceRoot}/build/tests/${input:testName}",
-      "args": [],
+      "program": "${workspaceRoot}/build/ctrc",
+      "args": ["${input:cliMode}", "ctr.tests/${input:scriptName}.ctr"],
       "cwd": "${workspaceRoot}",
 
       // Defaults (Linux/macOS)
@@ -66,6 +66,13 @@
       "type": "promptString",
       "description": "Test Name",
       "default": "default"
+    },
+
+    {
+      "id": "cliMode",
+      "type": "promptString",
+      "description": "CLI Mode",
+      "default": "run"
     },
     {
       "id": "scriptName",

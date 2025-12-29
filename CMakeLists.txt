@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 set(LIBRARY_TYPE STATIC)
@@ -17,11 +17,11 @@ add_library(${PROJECT_NAME} ${LIBRARY_TYPE}
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # CLI
-#set(CLI_TARGET "${PROJECT_NAME}_cli")
-#add_executable(${CLI_TARGET}
-#    src/cli.c
-#)
-#target_link_libraries(${CLI_TARGET} PRIVATE ${PROJECT_NAME})
+set(CLI_TARGET ctrc)
+add_executable(${CLI_TARGET}
+    src/cli.c
+)
+target_link_libraries(${CLI_TARGET} PRIVATE ${PROJECT_NAME})
 
 option(ENABLE_SANITIZERS "Enable sanitizers" OFF)
 if (ENABLE_SANITIZERS AND NOT MSVC)

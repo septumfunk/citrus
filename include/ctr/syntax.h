@@ -26,17 +26,13 @@ typedef enum {
 typedef struct {
     ctr_tokentype tt;
     ctr_val value;
-    uint32_t line, column;
+    uint16_t line, column;
 } ctr_token;
 
 typedef struct {
-    enum ctr_scan_errt {
-        CTR_ERRS_UNEXPECTED_TOKEN,
-        CTR_ERRS_UNTERMINATED_STR,
-        CTR_ERRS_NUMBER_FORMAT,
-    } tt;
+    ctr_error tt;
     sf_str token;
-    uint32_t line, column;
+    uint16_t line, column;
 } ctr_scan_err;
 
 struct ctr_tokenvec;
@@ -62,86 +58,81 @@ void _ctr_keywords_cleanup(struct ctr_keywords *vec);
 #include <sf/containers/expected.h>
 EXPORT ctr_scan_ex ctr_scan(sf_str src);
 
+/// Node types that the parser is capable of producing
 typedef enum {
-    CTR_ND_BINARY,
+    CTR_ND_BLOCK,
+
     CTR_ND_IDENTIFIER,
     CTR_ND_LITERAL,
+
     CTR_ND_LET,
     CTR_ND_ASSIGN,
+
+    CTR_ND_BINARY,
     CTR_ND_CALL,
-    CTR_ND_IF,
-    CTR_ND_BLOCK,
     CTR_ND_FUN,
+
+    CTR_ND_IF,
     CTR_ND_WHILE,
     CTR_ND_RETURN,
 } ctr_nodetype;
 
+/// A node in the AST (Abstract Syntax Tree) that the parser exports.
+/// The compiler walks these to make the bytecode :)
 typedef struct ctr_node {
     ctr_nodetype tt;
-    size_t line, column;
-    union ctr_ninner {
-        ctr_val literal, identifier;
-        struct ctr_node *stmt_ret;
-        struct {
-            ctr_tokentype tt;
+    uint16_t line, column;
+    union {
+        ctr_val n_literal, n_identifier;
+        struct ctr_node *n_return;
+        struct { // x <op> y
+            ctr_tokentype op;
             struct ctr_node *left;
             struct ctr_node *right;
-        } binary;
-        struct {
+        } n_binary;
+        struct { // <let> n = v;
             ctr_val name;
             struct ctr_node *value;
-        } stmt_let, stmt_assign;
-        struct {
+        } n_let, n_assign;
+        struct { // if c {t} else {e}
             struct ctr_node *condition;
             struct ctr_node *then_node;
             struct ctr_node *else_node;
-        } stmt_if;
-        struct {
+        } n_if;
+        struct { // x(a)
             ctr_val name;
             struct ctr_node **args;
             uint32_t arg_c;
-        } stmt_call;
-        struct {
+        } n_call;
+        struct { // while c {b}
             struct ctr_node *condition;
             struct ctr_node *block;
-        } stmt_while;
-        struct ctr_block {
+        } n_while;
+        struct ctr_block { // {s}
             struct ctr_node **stmts;
             uint32_t count;
-        } block;
-        struct {
+        } n_block;
+        struct { // [c](a) {b}
             ctr_val *captures;
             uint32_t cap_c;
             ctr_val *args;
             uint32_t arg_c;
             struct ctr_node *block;
-        } fun;
-    } inner;
+        } n_fun;
+    };
 } ctr_node;
 
+/// Returns whether an expression can evaluate to a bool or not
 EXPORT bool ctr_niscondition(ctr_node *node);
-EXPORT void ctr_node_free(ctr_node *tree);
+/// Walk through an AST and free all of its nodes
+EXPORT void ctr_node_free(ctr_node *root);
 
+/// A possible result of parsing, describes what went wrong and where
 typedef struct {
-    enum ctr_parse_errt {
-        CTR_ERRP_NO_TOKENS,
-        CTR_ERRP_EXPECTED_EXPRESSION,
-        CTR_ERRP_EXPECTED_IDENTIFIER,
-        CTR_ERRP_EXPECTED_LPAREN,
-        CTR_ERRP_EXPECTED_RPAREN,
-        CTR_ERRP_EXPECTED_RBRACE,
-        CTR_ERRP_EXPECTED_EQUAL,
-        CTR_ERRP_EXPECTED_SEMICOLON,
-        CTR_ERRP_EXPECTED_CONDITION,
-        CTR_ERRP_EXPECTED_BLOCK,
-        CTR_ERRP_EXPECTED_STMT,
-        CTR_ERRP_EXPECTED_ARGS,
-        CTR_ERRP_UNTERMINATED_ARGS,
-        CTR_ERRP_UNTERMINATED_CAPTURES,
-    } tt;
-    size_t line, column;
+    ctr_error tt;
+    uint16_t line, column;
 } ctr_parse_err;
-
+/// An optional type alias for the root node of an AST
 typedef ctr_node *ctr_ast;
 
 #define EXPECTED_NAME ctr_parse_ex
