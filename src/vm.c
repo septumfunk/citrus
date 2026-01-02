@@ -42,6 +42,11 @@ sf_str ctr_tostring(ctr_val val) {
                 case CTR_DARRAY:
                 case CTR_DFUN: return sf_str_fmt("%p", val.dyn);
                 case CTR_DREF: return ctr_tostring(*(ctr_val *)val.dyn);
+
+                case CTR_DUSR: {
+                    ctr_usrwrap *w = ctr_uheader(val);
+                    return w->tostring ? w->tostring(ctr_uptr(val)) : sf_str_fmt("%p", val.dyn);
+                }
                 case CTR_DCOUNT: return SF_STR_EMPTY;
             }
         }
@@ -155,6 +160,9 @@ ctr_call_ex ctr_call_bc(ctr_state *state, ctr_fproto *proto, const ctr_val *args
         LABEL(CTR_OP_SET),
         LABEL(CTR_OP_GET),
 
+        LABEL(CTR_OP_SUPO),
+        LABEL(CTR_OP_GUPO),
+
         LABEL(CTR_OP_UNKNOWN),
     };
     #endif
@@ -197,7 +205,7 @@ ctr_call_ex ctr_call_bc(ctr_state *state, ctr_fproto *proto, const ctr_val *args
         CASE(CTR_OP_CALL) {
             ctr_val fun = ctr_get(state, ctr_iabc_b(ins));
             if (!ctr_isdtype(fun, CTR_DFUN))
-                return ctr_callerr(CTR_ERRV_TYPE_MISMATCH, "Expected fun at [%d], found %s.", ctr_iabc_b(ins), ctr_typename(fun).c_str);
+                return ctr_callerr(CTR_ERRV_TYPE_MISMATCH, "Expected fun at r[%d], found %s.", ctr_iabc_b(ins), ctr_typename(fun).c_str);
 
             ctr_fproto f = *(ctr_fproto *)fun.dyn;
             ctr_call_ex fex;
@@ -226,7 +234,7 @@ ctr_call_ex ctr_call_bc(ctr_state *state, ctr_fproto *proto, const ctr_val *args
 
             if (lhs.tt != rhs.tt) {
                 if (lhs.tt == CTR_TDYN || rhs.tt == CTR_TDYN)
-                    return ctr_callerr(CTR_ERRV_TYPE_MISMATCH, "Cannot convert dynamic object and primitive.", NULL);
+                    return ctr_callerr(CTR_ERRV_TYPE_MISMATCH, "Cannot convert dynamic obj and primitive.", NULL);
                 switch (lhs.tt) {
                     case CTR_TI64: rhs = (ctr_val){.tt = CTR_TI64, .i64 = (ctr_i64)rhs.f64}; break;
                     case CTR_TF64: rhs = (ctr_val){.tt = CTR_TF64, .f64 = (ctr_f64)rhs.i64}; break;
@@ -256,7 +264,7 @@ ctr_call_ex ctr_call_bc(ctr_state *state, ctr_fproto *proto, const ctr_val *args
             ctr_val rhs = ctr_get(state, ctr_iabc_c(ins));
 
             if (lhs.tt == CTR_TDYN || rhs.tt == CTR_TDYN)
-                return ctr_callerr(CTR_ERRV_TYPE_MISMATCH, "Cannot convert dynamic object and primitive.", NULL);
+                return ctr_callerr(CTR_ERRV_TYPE_MISMATCH, "Cannot convert dynamic obj and primitive.", NULL);
             if (lhs.tt != rhs.tt) {
                 switch (lhs.tt) {
                     case CTR_TI64: rhs = (ctr_val){.tt = CTR_TI64, .i64 = (ctr_i64)rhs.f64}; break;
@@ -280,7 +288,7 @@ ctr_call_ex ctr_call_bc(ctr_state *state, ctr_fproto *proto, const ctr_val *args
             ctr_val rhs = ctr_get(state, ctr_iabc_c(ins));
 
             if (lhs.tt == CTR_TDYN || rhs.tt == CTR_TDYN)
-                return ctr_callerr(CTR_ERRV_TYPE_MISMATCH, "Cannot convert dynamic object and primitive.", NULL);
+                return ctr_callerr(CTR_ERRV_TYPE_MISMATCH, "Cannot convert dynamic obj and primitive.", NULL);
             if (lhs.tt != rhs.tt) {
                 switch (lhs.tt) {
                     case CTR_TI64: rhs = (ctr_val){.tt = CTR_TI64, .i64 = (ctr_i64)rhs.f64}; break;
@@ -304,7 +312,7 @@ ctr_call_ex ctr_call_bc(ctr_state *state, ctr_fproto *proto, const ctr_val *args
             ctr_val rhs = ctr_get(state, ctr_iabc_c(ins));
 
             if (lhs.tt == CTR_TDYN || rhs.tt == CTR_TDYN)
-                return ctr_callerr(CTR_ERRV_TYPE_MISMATCH, "Cannot convert dynamic object and primitive.", NULL);
+                return ctr_callerr(CTR_ERRV_TYPE_MISMATCH, "Cannot convert dynamic obj and primitive.", NULL);
             if (lhs.tt != rhs.tt) {
                 switch (lhs.tt) {
                     case CTR_TI64: rhs = (ctr_val){.tt = CTR_TI64, .i64 = (ctr_i64)rhs.f64}; break;
@@ -462,14 +470,14 @@ ctr_call_ex ctr_call_bc(ctr_state *state, ctr_fproto *proto, const ctr_val *args
             ctr_upvalue *upv = proto->upvals + ctr_iab_a(ins);
             if (upv->tt == CTR_UP_VAL)
                 upv->value = ctr_dref(v);
-            else ctr_rawset(state, upv->ref, ctr_dref(v), (uint32_t)((int64_t)(state->frames.count - 1) + upv->frame_o));
+            else ctr_rawset(state, upv->ref, ctr_dref(v), upv->frame);
             DISPATCH();
         }
         CASE(CTR_OP_GETU) {
             ctr_upvalue *upv = proto->upvals + ctr_iab_b(ins);
             if (upv->tt == CTR_UP_VAL)
                 ctr_set(state, ctr_iab_a(ins), ctr_dref(upv->value));
-            else ctr_set(state, ctr_iab_a(ins), ctr_dref(ctr_rawget(state, upv->ref, (uint32_t)((int64_t)(state->frames.count - 1) + upv->frame_o))));
+            else ctr_set(state, ctr_iab_a(ins), ctr_dref(ctr_rawget(state, upv->ref, upv->frame)));
             DISPATCH();
         }
         CASE(CTR_OP_REFU) {
@@ -489,9 +497,9 @@ ctr_call_ex ctr_call_bc(ctr_state *state, ctr_fproto *proto, const ctr_val *args
             ctr_val key = ctr_get(state, ctr_iabc_b(ins));
             ctr_val val = ctr_get(state, ctr_iabc_c(ins));
             if (!ctr_isdtype(obj, CTR_DOBJ))
-                return ctr_callerr(CTR_ERRV_TYPE_MISMATCH, "Expected object at [%d], found %s.", ctr_iabc_a(ins), ctr_typename(obj).c_str);
+                return ctr_callerr(CTR_ERRV_TYPE_MISMATCH, "Expected obj at r[%d], found %s.", ctr_iabc_a(ins), ctr_typename(obj).c_str);
             if (!ctr_isdtype(key, CTR_DSTR))
-                return ctr_callerr(CTR_ERRV_TYPE_MISMATCH, "Expected str at [%d], found %s.", ctr_iabc_b(ins), ctr_typename(key).c_str);
+                return ctr_callerr(CTR_ERRV_TYPE_MISMATCH, "Expected str at r[%d], found %s.", ctr_iabc_b(ins), ctr_typename(key).c_str);
             ctr_dobj_ex ex = ctr_dobj_get((ctr_dobj *)obj.dyn, *(sf_str *)key.dyn);
             if (ex.is_ok && ex.ok.tt == CTR_TDYN)
                 ctr_ddel(ex.ok);
@@ -502,13 +510,49 @@ ctr_call_ex ctr_call_bc(ctr_state *state, ctr_fproto *proto, const ctr_val *args
             ctr_val obj = ctr_get(state, ctr_iabc_b(ins));
             ctr_val key = ctr_get(state, ctr_iabc_c(ins));
             if (!ctr_isdtype(obj, CTR_DOBJ))
-                return ctr_callerr(CTR_ERRV_TYPE_MISMATCH, "Expected object at [%d], found %s.", ctr_iabc_b(ins), ctr_typename(obj).c_str);
+                return ctr_callerr(CTR_ERRV_TYPE_MISMATCH, "Expected obj at r[%d], found %s.", ctr_iabc_b(ins), ctr_typename(obj).c_str);
             if (!ctr_isdtype(key, CTR_DSTR))
-                return ctr_callerr(CTR_ERRV_TYPE_MISMATCH, "Expected str at [%d], found %s.", ctr_iabc_c(ins), ctr_typename(key).c_str);
+                return ctr_callerr(CTR_ERRV_TYPE_MISMATCH, "Expected str at r[%d], found %s.", ctr_iabc_c(ins), ctr_typename(key).c_str);
             ctr_dobj_ex ex = ctr_dobj_get((ctr_dobj *)obj.dyn, *(sf_str *)key.dyn);
-            if (!ex.is_ok)
-                return ctr_callerr(CTR_ERRV_MEMBER_NOT_FOUND, "Object [%d], does not contain member '%s'.", ctr_iabc_b(ins), ((sf_str *)key.dyn)->c_str);
+            if (!ex.is_ok) {
+                ctr_set(state, ctr_iabc_a(ins), ctr_dnewerr(sf_str_fmt("obj r[%d], does not contain member '%s'.", ctr_iabc_b(ins), ((sf_str *)key.dyn)->c_str)));
+                DISPATCH();
+            }
             ctr_set(state, ctr_iabc_a(ins), ctr_dref(ex.ok));
+            DISPATCH();
+        }
+
+        CASE(CTR_OP_GUPO) {
+            ctr_upvalue *upv = proto->upvals + ctr_iabc_b(ins);
+            ctr_val upo = upv->tt == CTR_UP_VAL ? upv->value : ctr_rawget(state, upv->ref, upv->frame);
+            if (!ctr_isdtype(upo, CTR_DOBJ))
+                return ctr_callerr(CTR_ERRV_TYPE_MISMATCH, "Expected obj at u[%d], found %s.", ctr_iabc_b(ins), ctr_typename(upo).c_str);
+            ctr_val kkey = ctr_valvec_get(&proto->constants, ctr_iabc_c(ins));
+            if (!ctr_isdtype(kkey, CTR_DSTR))
+                return ctr_callerr(CTR_ERRV_TYPE_MISMATCH, "Expected str at k[%d], found %s.", ctr_iabc_c(ins), ctr_typename(upo).c_str);
+
+            ctr_dobj_ex ex = ctr_dobj_get((ctr_dobj *)upo.dyn, *(sf_str *)kkey.dyn);
+            if (!ex.is_ok) {
+                ctr_set(state, ctr_iabc_a(ins), ctr_dnewerr(sf_str_fmt("obj u[%d], does not contain member '%s'.", ctr_iabc_b(ins), ((sf_str *)kkey.dyn)->c_str)));
+                DISPATCH();
+            }
+            ctr_set(state, ctr_iabc_a(ins), ctr_dref(ex.ok));
+            DISPATCH();
+        }
+        CASE(CTR_OP_SUPO) {
+            ctr_upvalue *upv = proto->upvals + ctr_iabc_a(ins);
+            ctr_val upo = upv->tt == CTR_UP_VAL ? upv->value : ctr_rawget(state, upv->ref, upv->frame);
+            if (!ctr_isdtype(upo, CTR_DOBJ))
+                return ctr_callerr(CTR_ERRV_TYPE_MISMATCH, "Expected obj at u[%d], found %s.", ctr_iabc_a(ins), ctr_typename(upo).c_str);
+            ctr_val kkey = ctr_valvec_get(&proto->constants, ctr_iabc_b(ins));
+            if (!ctr_isdtype(kkey, CTR_DSTR))
+                return ctr_callerr(CTR_ERRV_TYPE_MISMATCH, "Expected str at k[%d], found %s.", ctr_iabc_b(ins), ctr_typename(upo).c_str);
+            ctr_val val = ctr_get(state, ctr_iabc_c(ins));
+
+            ctr_dobj_ex ex = ctr_dobj_get((ctr_dobj *)upo.dyn, *(sf_str *)kkey.dyn);
+            if (ex.is_ok && ex.ok.tt == CTR_TDYN)
+                ctr_ddel(ex.ok);
+            ctr_dobj_set((ctr_dobj *)upo.dyn, sf_str_dup(*(sf_str *)kkey.dyn), ctr_dref(val));
             DISPATCH();
         }
 

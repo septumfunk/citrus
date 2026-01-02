@@ -1,6 +1,8 @@
 #include "ctr/bytecode.h"
 #include "ctr/vm.h"
+#include "sf/math.h"
 #include "sf/str.h"
+#include <sf/gfx/window.h>
 #include <sf/fs.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -241,6 +243,147 @@ ctr_call_ex ctr_std_fwrite(ctr_state *s) {
     return ctr_call_ex_ok(CTR_NIL);
 }
 
+sf_str _ctr_camera_tostr(sf_camera *c) { return sf_str_fmt("sf_camera (%f, %f, %f)", c->fov, c->near, c->far); }
+ctr_call_ex ctr_std_gfx_camera(ctr_state *s) {
+    ctr_val fov = ctr_get(s, 0);
+    ctr_val near = ctr_get(s, 1);
+    ctr_val far = ctr_get(s, 2);
+    if (fov.tt != CTR_TF64 && fov.tt != CTR_TI64)
+        return ctr_call_ex_err((ctr_call_err){CTR_ERRV_TYPE_MISMATCH,
+            sf_str_fmt("Arg 'fov' expected number, found '%s'", ctr_typename(fov).c_str),
+        0});
+    if (near.tt != CTR_TF64 && near.tt != CTR_TI64)
+        return ctr_call_ex_err((ctr_call_err){CTR_ERRV_TYPE_MISMATCH,
+            sf_str_fmt("Arg 'near' expected number, found '%s'", ctr_typename(near).c_str),
+        0});
+    if (far.tt != CTR_TF64 && far.tt != CTR_TI64)
+        return ctr_call_ex_err((ctr_call_err){CTR_ERRV_TYPE_MISMATCH,
+            sf_str_fmt("Arg 'far' expected number, found '%s'", ctr_typename(far).c_str),
+        0});
+    sf_camera main_cam = sf_camera_new(
+        SF_CAMERA_PERSPECTIVE,
+        fov.tt == CTR_TF64 ? (float)fov.f64 : (float)fov.i64,
+        near.tt == CTR_TF64 ? (float)near.f64 : (float)near.i64,
+        far.tt == CTR_TF64 ? (float)far.f64 : (float)far.i64
+    );
+    return ctr_call_ex_ok(ctr_dnewusr(
+        sizeof(sf_camera),
+        sf_lit("sf_camera"),
+        &main_cam,
+        (ctr_usrdel)sf_camera_delete,
+        (ctr_usrtostring)_ctr_camera_tostr
+    ));
+}
+
+sf_str _ctr_shader_tostr(sf_shader *s) { return sf_str_fmt("sf_shader ('%s')", s->path.c_str); }
+ctr_call_ex ctr_std_gfx_shader(ctr_state *s) {
+    ctr_val path = ctr_get(s, 0);
+    if (!ctr_isdtype(path, CTR_DSTR))
+        return ctr_call_ex_err((ctr_call_err){CTR_ERRV_TYPE_MISMATCH,
+            sf_str_fmt("Arg 'path' expected str, found '%s'", ctr_typename(path).c_str),
+        0});
+    sf_shader_ex sx = sf_shader_new(*(sf_str *)path.dyn);
+    if (!sx.is_ok) {
+        switch (sx.err.type) {
+            case SF_SHADER_COMPILE_ERROR:
+                return ctr_call_ex_ok(ctr_dnewerr(sf_str_fmt("Shader '%s' failed to compile: %s\n",
+                    ((sf_str *)path.dyn)->c_str, sx.err.compile_err.c_str)));
+            case SF_SHADER_NOT_FOUND:
+                return ctr_call_ex_ok(ctr_dnewerr(sf_str_fmt("Shader '%s' not found\n",
+                    ((sf_str *)path.dyn)->c_str)));
+            default: return ctr_call_ex_ok(ctr_dnewerr(sf_lit("Shader '%s' not found\n")));
+        }
+    }
+    return ctr_call_ex_ok(ctr_dnewusr(
+        sizeof(sf_shader),
+        sf_lit("sf_shader"),
+        &sx.ok,
+        (ctr_usrdel)sf_shader_free,
+        (ctr_usrtostring)_ctr_shader_tostr
+    ));
+}
+
+
+void _ctr_window_close(sf_window **w) { sf_window_close(*w); }
+sf_str _ctr_window_tostr(sf_window **w) { return sf_str_fmt("sf_window ('%s')", (*w)->title.c_str); }
+ctr_call_ex ctr_std_gfx_window(ctr_state *s) {
+    ctr_val title = ctr_get(s, 0);
+    ctr_val width = ctr_get(s, 1);
+    ctr_val height = ctr_get(s, 2);
+    ctr_val camera = ctr_get(s, 3);
+
+    if (!ctr_isdtype(title, CTR_DSTR))
+        return ctr_call_ex_err((ctr_call_err){CTR_ERRV_TYPE_MISMATCH,
+            sf_str_fmt("Arg 'title' expected str, found '%s'", ctr_typename(title).c_str),
+        0});
+    if (width.tt != CTR_TF64 && width.tt != CTR_TI64)
+        return ctr_call_ex_err((ctr_call_err){CTR_ERRV_TYPE_MISMATCH,
+            sf_str_fmt("Arg 'width' expected number, found '%s'", ctr_typename(width).c_str),
+        0});
+    if (height.tt != CTR_TF64 && height.tt != CTR_TI64)
+        return ctr_call_ex_err((ctr_call_err){CTR_ERRV_TYPE_MISMATCH,
+            sf_str_fmt("Arg 'height' expected number, found '%s'", ctr_typename(height).c_str),
+        0});
+    if (!ctr_isutype(camera, sf_lit("sf_camera")))
+        return ctr_call_ex_err((ctr_call_err){CTR_ERRV_TYPE_MISMATCH,
+            sf_str_fmt("Arg 'camera' expected 'sf_camera', found '%s'", ctr_typename(camera).c_str),
+        0});
+    sf_window_ex wx = sf_window_new(
+        *(sf_str *)title.dyn,
+        (sf_vec2){
+            (float)(width.tt == CTR_TF64 ? width.f64 : (ctr_f64)width.i64),
+            (float)(height.tt == CTR_TF64 ? height.f64 : (ctr_f64)height.i64)
+        },
+        ctr_uptr(camera),
+        SF_WINDOW_VISIBLE | SF_WINDOW_RESIZABLE
+    );
+    if (!wx.is_ok) {
+        switch (wx.err) {
+            case SF_GLFW_INIT_FAILED: return ctr_call_ex_ok(ctr_dnewerr(sf_lit("GLFW failed to initialize")));
+            case SF_GLFW_CREATE_FAILED: return ctr_call_ex_ok(ctr_dnewerr(sf_lit("GLFW failed to create a window")));
+            case SF_GLAD_INIT_FAILED: return ctr_call_ex_ok(ctr_dnewerr(sf_lit("GLAD failed to initialize")));
+            default: return ctr_call_ex_ok(ctr_dnewerr(sf_lit("Window failed to initialize")));
+        }
+    }
+    return ctr_call_ex_ok(ctr_dnewusr(
+        sizeof(sf_window *),
+        sf_lit("sf_window"),
+        &wx.ok,
+        (ctr_usrdel)_ctr_window_close,
+        (ctr_usrtostring)_ctr_window_tostr
+    ));
+}
+ctr_call_ex ctr_std_gfx_loop(ctr_state *s) {
+    ctr_val win = ctr_get(s, 0);
+    if (!ctr_isutype(win, sf_lit("sf_window")))
+        return ctr_call_ex_err((ctr_call_err){CTR_ERRV_TYPE_MISMATCH,
+            sf_str_fmt("Arg 'win' expected 'sf_window', found '%s'", ctr_typename(win).c_str),
+        0});
+    return ctr_call_ex_ok((ctr_val){.tt = CTR_TBOOL, .boolean = sf_window_loop(*(sf_window **)ctr_uptr(win))});
+}
+ctr_call_ex ctr_std_gfx_draw(ctr_state *s) {
+    ctr_val win = ctr_get(s, 0);
+    if (!ctr_isutype(win, sf_lit("sf_window")))
+        return ctr_call_ex_err((ctr_call_err){CTR_ERRV_TYPE_MISMATCH,
+            sf_str_fmt("Arg 'win' expected 'sf_window', found '%s'", ctr_typename(win).c_str),
+        0});
+    ctr_val post = ctr_get(s, 1);
+    if (!ctr_isutype(post, sf_lit("sf_shader")))
+        return ctr_call_ex_err((ctr_call_err){CTR_ERRV_TYPE_MISMATCH,
+            sf_str_fmt("Arg 'post' expected 'sf_shader', found '%s'", ctr_typename(post).c_str),
+        0});
+    sf_draw_ex dx = sf_window_draw(*(sf_window **)ctr_uptr(win), ctr_uptr(post));
+    if (!dx.is_ok) {
+        switch (dx.err.type) {
+            case SF_DRAW_UNKNOWN_UNIFORM:
+                return ctr_call_ex_ok(ctr_dnewerr(sf_str_fmt("Unknown uniform: '%s'\n", dx.err.value.uniform_name.c_str)));
+            case SF_DRAW_SHADER_MISSING:
+                return ctr_call_ex_ok(ctr_dnewerr(sf_lit("Shader missing")));
+        }
+    }
+    return ctr_call_ex_ok((ctr_val){.tt = CTR_TBOOL, .boolean = (ctr_uptr(win))});
+}
+
 void ctr_usestd(ctr_state *state) {
     ctr_val io = ctr_dnew(CTR_DOBJ);
     ctr_dobj_set(io.dyn, sf_lit("print"), ctr_wrapcfun(ctr_std_print, 1, 0));
@@ -249,6 +392,12 @@ void ctr_usestd(ctr_state *state) {
     ctr_dobj_set(io.dyn, sf_lit("fread"), ctr_wrapcfun(ctr_std_fread, 2, 0));
     ctr_dobj_set(io.dyn, sf_lit("fwrite"), ctr_wrapcfun(ctr_std_fread, 2, 0));
 
+    ctr_val gfx = ctr_dnew(CTR_DOBJ);
+    ctr_dobj_set(gfx.dyn, sf_lit("camera"), ctr_wrapcfun(ctr_std_gfx_camera, 3, 0));
+    ctr_dobj_set(gfx.dyn, sf_lit("shader"), ctr_wrapcfun(ctr_std_gfx_shader, 1, 0));
+    ctr_dobj_set(gfx.dyn, sf_lit("window"), ctr_wrapcfun(ctr_std_gfx_window, 4, 0));
+    ctr_dobj_set(gfx.dyn, sf_lit("loop"), ctr_wrapcfun(ctr_std_gfx_loop, 1, 0));
+    ctr_dobj_set(gfx.dyn, sf_lit("draw"), ctr_wrapcfun(ctr_std_gfx_draw, 2, 0));
 
     ctr_val obj = ctr_dnew(CTR_DOBJ);
     ctr_dobj_set(obj.dyn, sf_lit("new"), ctr_wrapcfun(ctr_std_new, 0, 0));
@@ -268,6 +417,7 @@ void ctr_usestd(ctr_state *state) {
     ctr_dobj_set(_g, sf_lit("type"), ctr_wrapcfun(ctr_std_type, 1, 0));
 
     ctr_dobj_set(_g, sf_lit("io"), io);
+    ctr_dobj_set(_g, sf_lit("gfx"), gfx);
     ctr_dobj_set(_g, sf_lit("obj"), obj);
     ctr_dobj_set(_g, sf_lit("math"), math);
 

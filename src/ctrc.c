@@ -16,7 +16,7 @@
 typedef struct {
     uint32_t reg, scope;
     bool upval;
-    int32_t frame_o;
+    uint32_t frame;
 } ctr_local;
 
 struct ctr_scope;
@@ -48,7 +48,7 @@ typedef struct {
     ctr_fproto proto;
     ctr_ast ast;
     ctr_scopes scopes;
-    uint32_t locals, max_locals, temps, max_temps;
+    uint32_t locals, max_locals, temps, max_temps, frame;
     bool echo;
 } ctr_compiler;
 
@@ -59,7 +59,7 @@ static inline void ctr_cemitraw(ctr_compiler *c, ctr_instruction ins, uint16_t l
     if (c->echo) {
         const char *op = ctr_op_info(ctr_ins_op(ins))->mnemonic;
         switch (ctr_op_info(ctr_ins_op(ins))->type) {
-            case CTR_INS_A: printf("[ %.2u:%-6.2u%-7s%-4u        ]\n", line, column, op, ctr_ia_a(ins)); break;
+            case CTR_INS_A: printf("[ %.2u:%-6.2u%-7s%-8d    ]\n", line, column, op, ctr_ia_a(ins)); break;
             case CTR_INS_AB: printf("[ %.2u:%-6.2u%-7s%-4u%-4u    ]\n", line, column,  op, ctr_iab_a(ins), ctr_iab_b(ins)); break;
             case CTR_INS_ABC: printf("[ %.2u:%-6.2u%-7s%-4u%-4u%-4u]\n", line, column,  op, ctr_iabc_a(ins), ctr_iabc_b(ins), ctr_iabc_c(ins)); break;
         }
@@ -158,7 +158,7 @@ ctr_compile_ex ctr_cfun(ctr_node *ast, uint32_t arg_c, ctr_val *args, uint32_t u
     for (uint32_t i = 0; i < arg_c; ++i)
         ctr_scope_set(c.scopes.data + c.scopes.count - 1, sf_str_dup(*(sf_str *)args[i].dyn), (ctr_local){i, 0, false, 0});
     for (uint32_t i = 0; i < up_c; ++i)
-        ctr_scope_set(c.scopes.data + c.scopes.count - 1, sf_str_dup(upvals[i].name), (ctr_local){i, 0, true, upvals[i].frame_o});
+        ctr_scope_set(c.scopes.data + c.scopes.count - 1, sf_str_dup(upvals[i].name), (ctr_local){i, 0, true, upvals[i].frame});
 
     ctr_kadd(&c, (ctr_val){.tt = CTR_TBOOL, .boolean = false});
     ctr_kadd(&c, (ctr_val){.tt = CTR_TBOOL, .boolean = true});
@@ -219,12 +219,7 @@ ctr_cnode_ex ctr_cnode(ctr_compiler *c, ctr_node *node, uint32_t t_reg) {
                     ctr_kadd(c, ctr_dref(node->n_identifier));
                     name_i = c->proto.constants.count - 1;
                 }
-
-                uint32_t gt = ctr_rtemp(c), name = ctr_rtemp(c);
-                ctr_cemit(c, ctr_ins_ab(CTR_OP_GETU, gt, 0)); // state->global
-                ctr_cemit(c, ctr_ins_ab(CTR_OP_LOAD, name, name_i));
-                ctr_cemit(c, ctr_ins_abc(CTR_OP_GET, t_reg, gt, name));
-                ctr_ctemps(c, 2);
+                ctr_cemit(c, ctr_ins_abc(CTR_OP_GUPO, t_reg, 0, name_i)); // state->global
             } else // Local/Upval
                 ctr_cemit(c, ctr_ins_ab(loc.upval ? CTR_OP_GETU : CTR_OP_MOVE, t_reg, loc.reg));
 
@@ -283,12 +278,7 @@ ctr_cnode_ex ctr_cnode(ctr_compiler *c, ctr_node *node, uint32_t t_reg) {
                                 ctr_kadd(c, ctr_dref(node->n_binary.left->n_identifier));
                                 name_i = c->proto.constants.count - 1;
                             }
-
-                            uint32_t gt = ctr_rtemp(c), name = ctr_rtemp(c);
-                            ctr_cemit(c, ctr_ins_ab(CTR_OP_GETU, gt, 0)); // state->global
-                            ctr_cemit(c, ctr_ins_ab(CTR_OP_LOAD, name, name_i));
-                            ctr_cemit(c, ctr_ins_abc(CTR_OP_SET, gt, name, right));
-                            ctr_ctemps(c, 2);
+                            ctr_cemit(c, ctr_ins_abc(CTR_OP_SUPO, 0, name_i, right)); // state->global
                         }
                     } else if (node->n_binary.left->tt == CTR_ND_MEMBER) { // Member Assign
                         uint32_t obj = ctr_rtemp(c), name = ctr_rtemp(c);
@@ -364,13 +354,14 @@ ctr_cnode_ex ctr_cnode(ctr_compiler *c, ctr_node *node, uint32_t t_reg) {
                 if (!ctr_lexists(c, name, &loc))
                     return ctr_cerr(CTR_ERRC_UNKNOWN_LOCAL);
                 if (loc.upval)
-                    upvals[c->proto.up_c + i] = (ctr_upvalue){name, CTR_UP_REF, .ref = loc.reg, loc.frame_o - 1};
+                    upvals[c->proto.up_c + i] = (ctr_upvalue){name, CTR_UP_REF, .ref = loc.reg, .frame = loc.frame};
                 else {
                     ctr_cemit(c, ctr_ins_a(CTR_OP_REFU, loc.reg));
-                    upvals[c->proto.up_c + i] = (ctr_upvalue){name, CTR_UP_REF, .ref = loc.reg, .frame_o = -1};
+                    upvals[c->proto.up_c + i] = (ctr_upvalue){name, CTR_UP_REF, .ref = loc.reg, .frame = c->frame};
                 }
             }
 
+            ++c->frame;
             ctr_clog(c, sf_lit(TUI_BLD "[=========  BGN FUN  =========]" TUI_CLR));
             ctr_compile_ex ex = ctr_cfun(
                 node->n_fun.block,
@@ -380,6 +371,7 @@ ctr_cnode_ex ctr_cnode(ctr_compiler *c, ctr_node *node, uint32_t t_reg) {
             );
             ctr_clog(c, sf_lit(TUI_BLD "[=========  END FUN  =========]" TUI_CLR));
             free(upvals);
+            --c->frame;
 
             if (!ex.is_ok) return ctr_cnode_ex_err(ex.err);
             ctr_val fun = ctr_dnew(CTR_DFUN);
@@ -401,12 +393,10 @@ ctr_cnode_ex ctr_cnode(ctr_compiler *c, ctr_node *node, uint32_t t_reg) {
                         name_i = c->proto.constants.count - 1;
                     }
 
-                    uint32_t gt = ctr_rtemp(c), name = ctr_rtemp(c), id_r = ctr_rtemp(c);
-                    ctr_cemit(c, ctr_ins_ab(CTR_OP_GETU, gt, 0));
-                    ctr_cemit(c, ctr_ins_ab(CTR_OP_LOAD, name, name_i));
-                    ctr_cemit(c, ctr_ins_abc(CTR_OP_GET, id_r, gt, name));
+                    uint32_t id_r = ctr_rtemp(c);
+                    ctr_cemit(c, ctr_ins_abc(CTR_OP_GUPO, id_r, 0, name_i));
                     ctr_cemit(c, ctr_ins_abc(CTR_OP_EQ, 0, id_r, cr));
-                    ctr_ctemps(c, 3);
+                    ctr_ctemps(c, 1);
                 } else { // Local
                     ctr_cemit(c, ctr_ins_ab(CTR_OP_LOAD, cr, 1));
                     if (loc.upval) { // Reserve temp for upval
@@ -422,7 +412,7 @@ ctr_cnode_ex ctr_cnode(ctr_compiler *c, ctr_node *node, uint32_t t_reg) {
                 if (node->n_if.condition->tt == CTR_ND_CALL) {
                     uint32_t ttemp = ctr_rtemp(c);
                     ctr_cemit(c, ctr_ins_ab(CTR_OP_LOAD, ttemp, 1));
-                    ctr_cemit(c, ctr_ins_abc(CTR_OP_EQ, cr, cr, ttemp));
+                    ctr_cemit(c, ctr_ins_abc(CTR_OP_EQ, 0, cr, ttemp));
                     ctr_ctemps(c, 1);
                 }
                 if (!ex.is_ok) return ex;
@@ -461,12 +451,10 @@ ctr_cnode_ex ctr_cnode(ctr_compiler *c, ctr_node *node, uint32_t t_reg) {
                         name_i = c->proto.constants.count - 1;
                     }
 
-                    uint32_t gt = ctr_rtemp(c), name = ctr_rtemp(c), id_r = ctr_rtemp(c);
-                    ctr_cemit(c, ctr_ins_ab(CTR_OP_GETU, gt, 0));
-                    ctr_cemit(c, ctr_ins_ab(CTR_OP_LOAD, name, name_i));
-                    ctr_cemit(c, ctr_ins_abc(CTR_OP_GET, id_r, gt, name));
+                    uint32_t id_r = ctr_rtemp(c);
+                    ctr_cemit(c, ctr_ins_abc(CTR_OP_GUPO, id_r, 0, name_i));
                     ctr_cemit(c, ctr_ins_abc(CTR_OP_EQ, 0, id_r, cr));
-                    ctr_ctemps(c, 3);
+                    ctr_ctemps(c, 1);
                 } else { // Local
                     ctr_cemit(c, ctr_ins_ab(CTR_OP_LOAD, cr, 1));
                     if (loc.upval) { // Reserve temp for upval
@@ -482,7 +470,7 @@ ctr_cnode_ex ctr_cnode(ctr_compiler *c, ctr_node *node, uint32_t t_reg) {
                 if (node->n_while.condition->tt == CTR_ND_CALL) {
                     uint32_t ttemp = ctr_rtemp(c);
                     ctr_cemit(c, ctr_ins_ab(CTR_OP_LOAD, ttemp, 1));
-                    ctr_cemit(c, ctr_ins_abc(CTR_OP_EQ, cr, cr, ttemp));
+                    ctr_cemit(c, ctr_ins_abc(CTR_OP_EQ, 0, cr, ttemp));
                     ctr_ctemps(c, 1);
                 }
                 if (!ex.is_ok) return ex;

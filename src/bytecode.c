@@ -1,4 +1,5 @@
 #include "ctr/bytecode.h"
+#include "sf/gfx/window.h"
 #include "sf/str.h"
 #include <stdlib.h>
 
@@ -79,6 +80,8 @@ ctr_val ctr_dnew(ctr_dtype tt) {
         case CTR_DARRAY: size = sizeof(ctr_valvec); break;
         case CTR_DFUN: size = sizeof(ctr_fproto); break;
         case CTR_DREF: size = sizeof(ctr_val); break;
+
+        case CTR_DUSR:
         case CTR_DCOUNT: return CTR_NIL;
     }
 
@@ -98,9 +101,34 @@ ctr_val ctr_dnew(ctr_dtype tt) {
         case CTR_DARRAY: *(ctr_valvec *)p = ctr_valvec_new(); break;
         case CTR_DFUN: *(ctr_fproto *)p = ctr_fproto_new(); break;
         case CTR_DREF: *(ctr_val *)p = CTR_NIL; break;
+
+        case CTR_DUSR:
         case CTR_DCOUNT: return CTR_NIL;
     }
     return (ctr_val){ .tt = CTR_TDYN, .dyn = p };
+}
+
+ctr_val ctr_dnewusr(size_t size, sf_str name, void *value, ctr_usrdel del, ctr_usrtostring tostring) {
+    ctr_dyn p = calloc(1, sizeof(ctr_dheader) + sizeof(ctr_usrwrap) + size);
+
+    *(ctr_dheader *)p = (ctr_dheader){
+        .size = size + sizeof(ctr_usrwrap),
+        .is_const = false,
+        .tt = CTR_DUSR,
+        .rc = 1,
+    };
+    p = (char *)p + sizeof(ctr_dheader);
+
+    ctr_usrwrap *w = p;
+    *w = (ctr_usrwrap){
+        name,
+        del,
+        tostring,
+    };
+    p = (char *)p + sizeof(ctr_usrwrap);
+
+    memcpy(p, value, size);
+    return (ctr_val){ .tt = CTR_TDYN, .dyn = w };
 }
 
 void ctr_ddel(ctr_val val) {
@@ -113,6 +141,15 @@ void ctr_ddel(ctr_val val) {
             case CTR_DARRAY: ctr_valvec_free(val.dyn); break;
             case CTR_DREF: ctr_ddel(*(ctr_val *)val.dyn); break;
             case CTR_DFUN: ctr_fproto_free((ctr_fproto *)val.dyn); break;
+
+            case CTR_DUSR: {
+                ctr_usrwrap *w = ctr_uheader(val);
+                sf_str_free(w->name);
+                sf_window *ww = ctr_uptr(val); (void)ww;
+                if (w->del)
+                    w->del(ctr_uptr(val));
+                break;
+            }
             case CTR_DCOUNT: break;
         }
         free(dh);
@@ -206,6 +243,17 @@ const ctr_inssig CTR_OP_INFO[CTR_OP_COUNT] = {
         .type = CTR_INS_ABC,
     },
 
+    [CTR_OP_SUPO] = {
+        .opcode = CTR_OP_SUPO,
+        .mnemonic = "SUPO",
+        .type = CTR_INS_ABC,
+    },
+    [CTR_OP_GUPO] = {
+        .opcode = CTR_OP_GUPO,
+        .mnemonic = "GUPO",
+        .type = CTR_INS_ABC,
+    },
+
     [CTR_OP_UNKNOWN] = {
         .opcode = CTR_OP_UNKNOWN,
         .mnemonic = "???",
@@ -224,5 +272,7 @@ const sf_str CTR_TYPE_NAMES[(size_t)CTR_TCOUNT + (size_t)CTR_DCOUNT] = {
     sf_lit("obj"),
     sf_lit("array"),
     sf_lit("fun"),
-    sf_lit("dval"),
+    sf_lit("ref"),
+
+    sf_lit("usr"),
 };

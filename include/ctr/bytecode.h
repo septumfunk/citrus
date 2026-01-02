@@ -8,7 +8,7 @@
 #include <stdlib.h>
 
 // Define CTR_DBG_LOG to get debug output from the compiler and vm
-#define CTR_DBG_LOG true
+//#define CTR_DBG_LOG true
 
 #ifdef CTR_DBG_LOG
 #define ctr_log(lit) printf(lit"\n")
@@ -46,6 +46,9 @@ typedef enum {
 
     CTR_OP_SET,
     CTR_OP_GET,
+
+    CTR_OP_SUPO,
+    CTR_OP_GUPO,
 
     CTR_OP_UNKNOWN,
     CTR_OP_COUNT,
@@ -132,6 +135,8 @@ typedef enum {
     CTR_DFUN,
     CTR_DREF,
 
+    CTR_DUSR,
+
     CTR_DCOUNT,
 } ctr_dtype;
 extern const sf_str CTR_TYPE_NAMES[(size_t)CTR_TCOUNT + (size_t)CTR_DCOUNT];
@@ -171,7 +176,7 @@ typedef struct {
         ctr_val value;
         uint32_t ref;
     };
-    int32_t frame_o;
+    uint32_t frame;
 } ctr_upvalue;
 
 struct ctr_state;
@@ -213,6 +218,14 @@ void _ctr_dobj_cleanup(struct ctr_dobj *obj);
 #include <sf/containers/map.h>
 typedef ctr_fproto *ctr_dfun;
 
+typedef void (*ctr_usrdel)(void *);
+typedef sf_str (*ctr_usrtostring)(void *);
+typedef struct {
+    sf_str name;
+    ctr_usrdel del;
+    ctr_usrtostring tostring;
+} ctr_usrwrap;
+
 /// Allocates a dynamic object, a heap allocated object with an information header
 EXPORT ctr_val ctr_dnew(ctr_dtype tt);
 /// Shorthand for using ctr_dnew and assigning a string value.
@@ -252,10 +265,23 @@ static inline ctr_val ctr_dval(ctr_val val) {
         return *(ctr_val *)val.dyn;
     return val;
 }
+
+/// Allocates a dynamic usertype object, a dynamic type with extra user info
+EXPORT ctr_val ctr_dnewusr(size_t size, sf_str name, void *value, ctr_usrdel del, ctr_usrtostring tostring);
+
+/// Gets the usrwrap header of a usrtype object
+static inline ctr_usrwrap *ctr_uheader(ctr_val val) { return val.dyn; }
+/// Gets the true pointer of a usrtype object
+static inline void *ctr_uptr(ctr_val val) { return (char *)val.dyn + sizeof(ctr_usrwrap); }
+
 /// Returns a (static) string denoting the type of a value
 static inline sf_str ctr_typename(ctr_val val) {
-    
+    if (ctr_isdtype(val, CTR_DUSR))
+        return ctr_uheader(val)->name;
     return val.tt == CTR_TDYN ? CTR_TYPE_NAMES[(int)CTR_TDYN + 1 + ctr_header(val)->tt] : CTR_TYPE_NAMES[val.tt];
 }
+/// Returns whether a usrtype object is of the specified type
+static inline bool ctr_isutype(ctr_val val, sf_str name) { return sf_str_eq(name, ctr_typename(val)); }
+
 
 #endif // BYTECODE_H
