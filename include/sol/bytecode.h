@@ -104,7 +104,6 @@ extern const sf_str SOL_ERR_STRINGS[SOL_ERR_COUNT];
 
 typedef uint32_t sol_dbg;
 
-
 typedef struct {
     sol_opcode opcode;
     const char *mnemonic;
@@ -283,5 +282,8 @@ static inline sf_str sol_typename(sol_val val) {
 /// Returns whether a usrtype object is of the specified type
 static inline bool sol_isutype(sol_val val, sf_str name) { return sf_str_eq(name, sol_typename(val)); }
 
+
+EXPORT sf_str sol_dasmi(sol_instruction ins);
+EXPORT sf_str sol_dasmp(sol_fproto *proto);
 
 #endif // BYTECODE_H

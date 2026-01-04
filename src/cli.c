@@ -1,10 +1,17 @@
 #include "sol/bytecode.h"
 #include "sol/solc.h"
 #include "sol/vm.h"
+#include "sol/cli.h"
 #include <sf/str.h>
 #include <sf/fs.h>
 #include <stdio.h>
 #include <string.h>
+
+#ifdef _WIN32
+//TODO: pdcurses
+#else
+#include <ncurses.h>
+#endif
 
 #define TUI_UL  "\x1b[4m"
 #define TUI_BLD "\x1b[1m"
@@ -14,7 +21,6 @@
 typedef enum {
     CLI_RUN,
     CLI_DBG,
-    CLI_COMP,
 } cli_mode;
 
 void cli_highlight_line(sf_str src, sf_str err, uint16_t line, uint16_t column) {
@@ -64,7 +70,6 @@ sf_str cli_load_file(char *name) {
     return sf_own((char *)fsb.ok.ptr);
 }
 
-
 int cli_run(char *path, sf_str src) {
     sol_state *s = sol_state_new();
     sol_usestd(s);
@@ -103,35 +108,9 @@ int cli_run(char *path, sf_str src) {
     return 0;
 }
 
-int cli_dbg(char *path, sf_str src) {
-    (void)path; (void)src;
-    fprintf(stderr, TUI_ERR "Unimplemented\n" TUI_CLR);
-    return 0;
-}
-
-int cli_comp(char *path, sf_str src) {
-    sol_state *s = sol_state_new();
-    sol_usestd(s);
-
-    printf(TUI_UL TUI_BLD "[ LN:COL = OP === A = B = C = ]\n" TUI_CLR);
-    sol_compile_ex comp_ex = sol_cproto(src, 0, NULL, 1, (sol_upvalue[]){
-        (sol_upvalue){sf_lit("_g"), SOL_UP_VAL, .value = sol_dref(s->global)}
-    }, true);
-
-    if (!comp_ex.is_ok) {
-        fprintf(stderr, TUI_ERR "error: %s:%u:%u\n" TUI_CLR, path, comp_ex.err.line, comp_ex.err.column);
-        cli_highlight_line(src, sol_err_string(comp_ex.err.tt), comp_ex.err.line, comp_ex.err.column);
-        sol_state_free(s);
-        return -1;
-    }
-    sol_state_free(s);
-    return 0;
-}
-
-
 int main(int argc, char **argv) {
     if (argc == 1) {
-        printf("Usage: %s [run|dbg|comp] <file>\n", argv[0]);
+        printf("Usage: %s [run|dbg] <file>\n", argv[0]);
         return 1;
     }
 
@@ -148,14 +127,8 @@ int main(int argc, char **argv) {
             return 1;
         }
         mode = CLI_DBG;
-    } else if (!strcmp(argv[1], "comp")) {
-        if (argc == 2) {
-            printf("Usage: %s comp <file>\n", argv[0]);
-            return 1;
-        }
-        mode = CLI_COMP;
     } else {
-        printf("Unknown option '%s'.\nUsage: %s [run|debug|comp] <file>\n", argv[1], argv[0]);
+        printf("Unknown option '%s'.\nUsage: %s [run|dbg] <file>\n", argv[1], argv[0]);
         return 1;
     }
 
@@ -166,8 +139,7 @@ int main(int argc, char **argv) {
     int ret;
     switch (mode) {
         case CLI_RUN: ret = cli_run(argv[2], src); break;
-        case CLI_DBG: ret = cli_dbg(argv[2], src); break;
-        case CLI_COMP: ret = cli_comp(argv[2], src); break;
+        case CLI_DBG: ret = sol_cli_cbg(argv[2], src); break;
     }
     sf_str_free(src);
     return ret;

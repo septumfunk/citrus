@@ -20,6 +20,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/in
 set(CLI_TARGET solus_cli)
 add_executable(${CLI_TARGET}
     src/cli.c
+    src/dbg.c
 )
 set_target_properties(${CLI_TARGET} PROPERTIES OUTPUT_NAME "solus")
 target_link_libraries(${CLI_TARGET} PRIVATE ${PROJECT_NAME})
@@ -71,6 +72,15 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(sf-std)
 target_link_libraries(${PROJECT_NAME} PUBLIC sf-std)
+
+# Curses
+if (WIN32)
+    target_include_directories(${CLI_TARGET} PUBLIC ${CMAKE_SOURCE_DIR}/deps/pdcurses/include)
+    target_link_libraries(${CLI_TARGET} PUBLIC ${CMAKE_SOURCE_DIR}/deps/pdcurses/lib/pdcurses.lib)
+else()
+    target_include_directories(${CLI_TARGET} PUBLIC ${CMAKE_SOURCE_DIR}/deps/ncurses-6.6/include)
+    target_link_libraries(${CLI_TARGET} PUBLIC ${CMAKE_SOURCE_DIR}/deps/ncurses-6.6/lib/libncurses.a)
+endif()
 
 # CTest
 if (PROJECT_IS_TOP_LEVEL)

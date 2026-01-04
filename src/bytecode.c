@@ -284,3 +284,29 @@ const sf_str SOL_TYPE_NAMES[(size_t)SOL_TCOUNT + (size_t)SOL_DCOUNT] = {
 
     sf_lit("usr"),
 };
+
+sf_str sol_dasmi(sol_instruction ins) {
+    const char *op = sol_op_info(sol_ins_op(ins))->mnemonic;
+    switch (sol_op_info(sol_ins_op(ins))->type) {
+        case SOL_INS_A: return sf_str_fmt("%-7s%-8d", op, sol_ia_a(ins));
+        case SOL_INS_AB: return sf_str_fmt("%-7s%-4u%-4u",  op, sol_iab_a(ins), sol_iab_b(ins)); break;
+        case SOL_INS_ABC: return sf_str_fmt("%-7s%-4u%-4u%-4u",  op, sol_iabc_a(ins), sol_iabc_b(ins), sol_iabc_c(ins)); break;
+    }
+}
+
+sf_str sol_dasmp(sol_fproto *p) {
+    sf_str final = SF_STR_EMPTY;
+    for (uint32_t pc = 0; pc < p->code_s; ++pc) {
+        sf_str bc = sol_dasmi(p->code[pc]);
+        uint16_t line = SOL_DBG_LINE(p->dbg[pc]), column = SOL_DBG_COL(p->dbg[pc]);
+        sf_str f = sf_str_fmt("%.2u:%-6.2u%s\n", line, column, bc.c_str);
+        sf_str_free(bc);
+        if (sf_isempty(final))
+            final = f;
+        else {
+            sf_str_append(&final, f);
+            sf_str_free(f);
+        }
+    }
+    return final;
+}

@@ -22,7 +22,7 @@ void sol_state_free(sol_state *state) {
 sol_compile_ex sol_compile(sol_state *state, sf_str src) {
     sol_compile_ex ex = sol_cproto(src, 0, NULL, 1, (sol_upvalue[]){
         (sol_upvalue){sf_lit("_g"), SOL_UP_VAL, .value = sol_dref(state->global)}
-    }, false);
+    });
     if (!ex.is_ok) return ex;
     return sol_compile_ex_ok(ex.ok);
 }

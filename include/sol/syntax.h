@@ -28,7 +28,7 @@ typedef enum {
 typedef struct {
     sol_tokentype tt;
     sol_val value;
-    uint16_t line, column, len;
+    uint16_t line, column;
 } sol_token;
 
 typedef struct {

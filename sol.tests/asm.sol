@@ -5,4 +5,9 @@ let asm_fun = asm(2) [](x) {
     CALL 2 1 0;
     RET  2;
 };
+
+if 1 != 1 {
+    panic(err(what));
+}
+
 return asm_fun("yay!");

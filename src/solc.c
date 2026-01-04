@@ -49,21 +49,12 @@ typedef struct {
     sol_ast ast;
     sol_scopes scopes;
     uint32_t locals, max_locals, temps, max_temps, frame;
-    bool echo;
 } sol_compiler;
 
 #define OP_W 10
 /// Add an instruction to the proto.
 /// Optionally logs every instruction compiled (see SOL_DBG_LOG)
 static inline void sol_cemitraw(sol_compiler *c, sol_instruction ins, uint16_t line, uint16_t column) {
-    if (c->echo) {
-        const char *op = sol_op_info(sol_ins_op(ins))->mnemonic;
-        switch (sol_op_info(sol_ins_op(ins))->type) {
-            case SOL_INS_A: printf("[ %.2u:%-6.2u%-7s%-8d    ]\n", line, column, op, sol_ia_a(ins)); break;
-            case SOL_INS_AB: printf("[ %.2u:%-6.2u%-7s%-4u%-4u    ]\n", line, column,  op, sol_iab_a(ins), sol_iab_b(ins)); break;
-            case SOL_INS_ABC: printf("[ %.2u:%-6.2u%-7s%-4u%-4u%-4u]\n", line, column,  op, sol_iabc_a(ins), sol_iabc_b(ins), sol_iabc_c(ins)); break;
-        }
-    }
     c->proto.code = realloc(c->proto.code, ++c->proto.code_s * sizeof(sol_instruction));
     c->proto.code[c->proto.code_s - 1] = ins;
     c->proto.dbg = realloc(c->proto.dbg, c->proto.code_s * sizeof(sol_dbg));
@@ -130,10 +121,6 @@ void sol_kadd(sol_compiler *c, sol_val con) {
     sol_valvec_push(&c->proto.constants, con);
 }
 
-void sol_clog(sol_compiler *c, sf_str str) {
-    if (c->echo) printf("%s\n", str.c_str);
-}
-
 /// Shorthand macro for returning a sol_cnode_ex_err
 #define sol_cerr(type) sol_cnode_ex_err((sol_compile_err){(type), node->line, node->column})
 
@@ -144,14 +131,13 @@ void sol_clog(sol_compiler *c, sf_str str) {
 sol_cnode_ex sol_cnode(sol_compiler *c, sol_node *node, uint32_t t_reg);
 
 /// Compile a fun from a block and info
-sol_compile_ex sol_cfun(sol_node *ast, uint32_t arg_c, sol_val *args, uint32_t up_c, sol_upvalue *upvals, bool echo) {
+sol_compile_ex sol_cfun(sol_node *ast, uint32_t arg_c, sol_val *args, uint32_t up_c, sol_upvalue *upvals) {
     sol_compiler c = {
         .proto = sol_fproto_new(),
         .ast = ast,
         .scopes = sol_scopes_new(),
         .locals = arg_c,
         .temps = 0, .max_temps = 0,
-        .echo = echo,
     };
     c.proto.arg_c = arg_c;
     sol_scopes_push(&c.scopes, sol_scope_new());
@@ -368,14 +354,11 @@ sol_cnode_ex sol_cnode(sol_compiler *c, sol_node *node, uint32_t t_reg) {
             }
 
             ++c->frame;
-            sol_clog(c, sf_lit(TUI_BLD "[=========  BGN FUN  =========]" TUI_CLR));
             sol_compile_ex ex = sol_cfun(
                 node->n_fun.block,
                 node->n_fun.arg_c, node->n_fun.args,
-                c->proto.up_c + node->n_fun.cap_c, upvals,
-                c->echo
+                c->proto.up_c + node->n_fun.cap_c, upvals
             );
-            sol_clog(c, sf_lit(TUI_BLD "[=========  END FUN  =========]" TUI_CLR));
             free(upvals);
             --c->frame;
 
@@ -539,7 +522,7 @@ sol_cnode_ex sol_cnode(sol_compiler *c, sol_node *node, uint32_t t_reg) {
     }
 }
 
-sol_compile_ex sol_cproto(sf_str src, uint32_t arg_c, sol_val *args, uint32_t up_c, sol_upvalue *upvals, bool echo) {
+sol_compile_ex sol_cproto(sf_str src, uint32_t arg_c, sol_val *args, uint32_t up_c, sol_upvalue *upvals) {
     sol_scan_ex scan_ex = sol_scan(src);
     if (!scan_ex.is_ok)
         return sol_compile_ex_err((sol_compile_err){
@@ -555,7 +538,7 @@ sol_compile_ex sol_cproto(sf_str src, uint32_t arg_c, sol_val *args, uint32_t up
             .column = par_ex.err.column,
         });
 
-    sol_compile_ex ex = sol_cfun(par_ex.ok, arg_c, args, up_c, upvals, echo);
+    sol_compile_ex ex = sol_cfun(par_ex.ok, arg_c, args, up_c, upvals);
     sol_node_free(par_ex.ok);
     return ex;
 }

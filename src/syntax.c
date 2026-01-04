@@ -28,7 +28,7 @@ static inline bool sol_scanpeek(sol_scanner *s, char match) {
     if (s->cc + 1 >= s->src.len || s->src.c_str[s->cc+1] != match)
         return false;
     ++s->cc;
-    ++s->current.len;
+    ++s->current.column;
     return true;
 }
 
@@ -47,19 +47,19 @@ sol_token sol_scanstr(sol_scanner *s) {
         ++len;
     }
     if (!terminated)
-        return (sol_token){TK_NIL, SOL_NIL, 0, 0, 0};
+        return (sol_token){TK_NIL, SOL_NIL, 0, 0};
 
     char *str = calloc(1, len + 1);
     memcpy(str, s->src.c_str + s->cc + 1, len);
 
     s->cc += len + 1;
+    s->current.column += len + 1;
 
     return (sol_token){
         TK_STRING,
         sol_dnewstr(sf_own(str)),
         s->current.line,
         s->current.column,
-        .len = (uint16_t)len + 2,
     };
 }
 
@@ -69,7 +69,7 @@ sol_token sol_scannum(sol_scanner *s) {
     for (size_t cc = s->cc + 1; cc < s->src.len; ++cc) {
         if (s->src.c_str[cc] == '.') {
             if (is_number)
-                return (sol_token){TK_NIL, SOL_NIL, 0, 0, 0};
+                return (sol_token){TK_NIL, SOL_NIL, 0, 0};
             is_number = true;
         } else if (!sol_isnumber(s->src.c_str[cc]))
             break;
@@ -80,6 +80,7 @@ sol_token sol_scannum(sol_scanner *s) {
     memset(str, 0, sizeof(str));
     memcpy(str, s->src.c_str + s->cc, len);
     s->cc += len - 1;
+    s->current.column += len - 1;
 
     sol_token tok;
     if (is_number)
@@ -88,7 +89,6 @@ sol_token sol_scannum(sol_scanner *s) {
             .value = (sol_val){.f64 = atof(str), .tt = SOL_TF64},
             .line = s->current.line,
             .column = s->current.column,
-            .len = (uint16_t)len,
         };
     else
         tok = (sol_token) {
@@ -96,7 +96,6 @@ sol_token sol_scannum(sol_scanner *s) {
             .value = (sol_val){.i64 = atoll(str), .tt = SOL_TI64},
             .line = s->current.line,
             .column = s->current.column,
-            .len = (uint16_t)len,
         };
     return tok;
 }
@@ -114,6 +113,7 @@ sol_token sol_scanidentifier(sol_scanner *s) {
     memcpy(str, s->src.c_str + s->cc, len);
 
     s->cc += len - 1;
+    s->current.column += len - 1;
 
     sol_keywords_ex ex = sol_keywords_get(&s->keywords, sf_ref(str));
     if (ex.is_ok) {
@@ -132,7 +132,6 @@ sol_token sol_scanidentifier(sol_scanner *s) {
             .value = value,
             .line = s->current.line,
             .column = s->current.column,
-            .len = len - 1,
         };
     } else {
         return (sol_token){
@@ -140,7 +139,6 @@ sol_token sol_scanidentifier(sol_scanner *s) {
             .value = sol_dnewstr(sf_str_cdup(str)),
             .line = s->current.line,
             .column = s->current.column,
-            .len = len - 1,
         };
     }
 }
@@ -149,7 +147,7 @@ sol_scan_ex sol_scan(sf_str src) {
     sol_tokenvec tks = sol_tokenvec_new();
     sol_scanner s = {
         .src = src,
-        .current = {TK_EOF, SOL_NIL, 1, 1, 0},
+        .current = {TK_EOF, SOL_NIL, 1, 1},
         .cc = 0,
         .keywords = sol_keywords_new(),
     };
@@ -171,9 +169,9 @@ sol_scan_ex sol_scan(sf_str src) {
     sol_keywords_set(&s.keywords, sf_lit("true"), TK_TRUE);
     sol_keywords_set(&s.keywords, sf_lit("false"), TK_FALSE);
 
-    sol_tokenvec_push(&tks, (sol_token){TK_SOF, SOL_NIL, s.current.line, s.current.column, 1});
+    sol_tokenvec_push(&tks, (sol_token){TK_SOF, SOL_NIL, s.current.line, s.current.column});
     for (; s.cc < src.len; ++s.cc) {
-        s.current = (sol_token){TK_EOF, SOL_NIL, s.current.line, s.current.column, 1};
+        s.current = (sol_token){TK_EOF, SOL_NIL, s.current.line, s.current.column};
         char c = src.c_str[s.cc];
         size_t pcc = s.cc;
         switch (c) {
@@ -194,11 +192,11 @@ sol_scan_ex sol_scan(sf_str src) {
             sol_scancase('=', sol_scanpeek(&s, '=') ? TK_DOUBLE_EQUAL : TK_EQUAL);
 
             case '&': {
-                if (sol_scanpeek(&s, '&')) { s.current.len = 2; s.current.tt = TK_AND; break; }
+                if (sol_scanpeek(&s, '&')) { s.current.tt = TK_AND; break; }
                 goto err;
             }
             case '|': {
-                if (sol_scanpeek(&s, '|')) { s.current.len = 2; s.current.tt = TK_OR; break; }
+                if (sol_scanpeek(&s, '|')) { s.current.tt = TK_OR; break; }
                 goto err;
             }
             case '/': {
@@ -224,7 +222,6 @@ sol_scan_ex sol_scan(sf_str src) {
                     goto err;
                 }
                 sol_tokenvec_push(&tks, s.current);
-                s.current.column += s.current.len;
                 continue;
             }
 
@@ -237,7 +234,6 @@ sol_scan_ex sol_scan(sf_str src) {
                 )) {
                     s.current.tt = TK_MINUS;
                     sol_tokenvec_push(&tks, s.current);
-                    s.current.column += s.current.len;
                     continue;
                 }
                 if (sol_isnumber(c) || (c == '-' && sol_isnumber(s.src.c_str[s.cc + 1]))) { // Number
@@ -247,12 +243,10 @@ sol_scan_ex sol_scan(sf_str src) {
                         goto err;
                     }
                     sol_tokenvec_push(&tks, s.current);
-                    s.current.column += s.current.len;
                     continue;
                 } else if (sol_isalphan(c)) { // Identifier
                     s.current = sol_scanidentifier(&s);
                     sol_tokenvec_push(&tks, s.current);
-                    s.current.column += s.current.len;
                     continue;
                 }
             err: {
@@ -270,12 +264,11 @@ sol_scan_ex sol_scan(sf_str src) {
                 return sol_scan_ex_err((sol_scan_err){eval, sf_own(str), s.current.line, s.current.column});
             }
         }
-        s.current.column += s.current.len;
         sol_tokenvec_push(&tks, s.current);
     }
 
     sol_keywords_free(&s.keywords);
-    sol_tokenvec_push(&tks, (sol_token){TK_EOF, SOL_NIL, s.current.line, s.current.column, 1});
+    sol_tokenvec_push(&tks, (sol_token){TK_EOF, SOL_NIL, s.current.line, s.current.column});
     return sol_scan_ex_ok(tks);
 }
 
@@ -431,7 +424,7 @@ sol_parse_ex sol_pprimary(sol_parser *p) {
         case TK_IDENTIFIER: {
             sol_node *n = malloc(sizeof(sol_node));
             *n = (sol_node){
-                p->tok->tt == TK_IDENTIFIER ? SOL_ND_IDENTIFIER : SOL_ND_LITERAL,
+                SOL_ND_IDENTIFIER,
                 p->tok->line, p->tok->column,
                 .n_identifier = sol_dref(p->tok->value),
             };
@@ -566,6 +559,7 @@ sol_parse_ex sol_plet(sol_parser *p) {
 }
 
 sol_parse_ex sol_ppostfix(sol_parser *p) {
+    uint16_t line = p->tok->line, column = p->tok->column;
     sol_parse_ex ex = sol_pprimary(p);
     if (!ex.is_ok) return ex;
     sol_node *node = ex.ok;
@@ -575,8 +569,8 @@ sol_parse_ex sol_ppostfix(sol_parser *p) {
             sol_node *call = malloc(sizeof(sol_node));
             *call = (sol_node){
                 .tt = SOL_ND_CALL,
-                .line = p->tok->line,
-                .column = p->tok->column,
+                .line = line,
+                .column = column,
                 .n_call = {
                     .identifier = node,
                     .args = NULL,
@@ -613,8 +607,8 @@ sol_parse_ex sol_ppostfix(sol_parser *p) {
             sol_node *member = malloc(sizeof(sol_node));
             *member = (sol_node){
                 .tt = SOL_ND_MEMBER,
-                .line = p->tok->line,
-                .column = p->tok->column,
+                .line = line,
+                .column = column,
                 .n_postfix = {
                     .expr = node,
                     .postfix = sol_dref(p->tok->value),
@@ -837,7 +831,7 @@ sol_parse_ex sol_pwhile(sol_parser *p) {
     if (ex.ok->tt != SOL_ND_BINARY || !sol_niscondition(ex.ok)) {
         uint16_t line = ex.ok->line;
         uint16_t column = ex.ok->column;
-        sol_parse_ex_err((sol_parse_err){SOL_ERRP_EXPECTED_CONDITION, line, column});
+        return sol_parse_ex_err((sol_parse_err){SOL_ERRP_EXPECTED_CONDITION, line, column});
     }
 
     if (p->tok->tt != TK_LEFT_BRACE) {
@@ -856,6 +850,7 @@ sol_parse_ex sol_pwhile(sol_parser *p) {
 }
 
 sol_parse_ex sol_preturn(sol_parser *p) {
+    uint16_t line = p->tok->line, column = p->tok->column;
     ++p->tok;
     sol_parse_ex expr = sol_pexpr(p, 0);
     if (!expr.is_ok) return expr;
@@ -869,7 +864,7 @@ sol_parse_ex sol_preturn(sol_parser *p) {
     sol_node *n_return = malloc(sizeof(sol_node));
     *n_return = (sol_node){
         .tt = SOL_ND_RETURN,
-        .line = (p->tok - 1)->line, .column = (p->tok - 1)->column,
+        .line = line, .column = column,
         .n_return = expr.ok,
     };
     return sol_parse_ex_ok(n_return);
