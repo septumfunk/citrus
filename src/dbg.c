@@ -147,12 +147,12 @@ static int sol_rdcmd(void) {
     }
     if (sf_str_eq(sf_ref(dbg.cmd), sf_lit("cm"))) {
         dbg.cap_cur = !dbg.cap_cur;
-        sol_cmderr(sf_lit(dbg.cap_cur ? "Cursor cap ON" : "Cursor cap OFF"));
+        sol_cmderr(sf_ref(dbg.cap_cur ? "Cursor cap ON" : "Cursor cap OFF"));
         return 0;
     }
     if (sf_str_eq(sf_ref(dbg.cmd), sf_lit("sm"))) {
         dbg.stack_frame = !dbg.stack_frame;
-        sol_cmderr(sf_lit(dbg.cap_cur ? "Stack frame ON" : "Stack frame OFF"));
+        sol_cmderr(sf_ref(dbg.cap_cur ? "Stack frame ON" : "Stack frame OFF"));
         return 0;
     }
 
