@@ -107,6 +107,7 @@ static int sol_rdcmd(void) {
     }
 
     bool rs = sf_str_eq(sf_ref(dbg.cmd), sf_lit("rs"));
+    bool n = sf_str_eq(sf_ref(dbg.cmd), sf_lit("n"));
     if ((rs || sf_str_eq(sf_ref(dbg.cmd), sf_lit("s"))) && dbg._break) { // Unset resume state
         dbg.proto.dbg_res = 0;
         dbg.proto.dbg_ll = 0;
@@ -117,7 +118,14 @@ static int sol_rdcmd(void) {
             return 0;
         }
     }
-    if (rs || sf_str_eq(sf_ref(dbg.cmd), sf_lit("r"))) {
+    if (rs || n || sf_str_eq(sf_ref(dbg.cmd), sf_lit("r"))) {
+        bool *o = NULL;
+        if (n) {
+            o = dbg.bp;
+            dbg.bp = malloc(dbg.proto.line_c * sizeof(bool));
+            memset(dbg.bp, 1, dbg.proto.line_c * sizeof(bool));
+        }
+
         sol_call_ex e = sol_dcall(dbg.s, &dbg.proto, NULL, dbg.bp);
         if (e.is_ok) {
             sf_str ret = sol_tostring(e.ok);
@@ -143,6 +151,10 @@ static int sol_rdcmd(void) {
             sol_writeout(p);
             dbg.pane = SOL_DBG_OUT;
             sf_str_free(p);
+        }
+        if (n) {
+            free(dbg.bp);
+            dbg.bp = o;
         }
         sol_cmdc();
         return 0;
