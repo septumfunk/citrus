@@ -1,1 +1,0 @@
-ncursesw/panel.h

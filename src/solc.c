@@ -8,9 +8,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef _WIN32
 #define TUI_UL  "\x1b[4m"
 #define TUI_BLD "\x1b[1m"
+#define TUI_ERR "\x1b[1;31m"
 #define TUI_CLR "\x1b[0m"
+#else
+#define TUI_UL  ""
+#define TUI_BLD ""
+#define TUI_ERR ""
+#define TUI_CLR ""
+#endif
 
 /// A simple representation of a local variable (or upvalue)
 typedef struct {
@@ -20,7 +28,7 @@ typedef struct {
 } sol_local;
 
 struct sol_scope;
-void _sol_scope_fe(void *_, sf_str key, sol_local _v) { (void)_v; sf_str_free(key); }
+void _sol_scope_fe(void *_u, sf_str key, sol_local _v) { (void)_u; (void)_v; sf_str_free(key); }
 void _sol_scope_cleanup(struct sol_scope *);
 
 #define MAP_NAME sol_scope
@@ -399,8 +407,8 @@ sol_cnode_ex sol_cnode(sol_compiler *c, sol_node *node, uint32_t t_reg) {
 
             switch (sol_op_info(node->n_ins.op)->type) {
                 case SOL_INS_A:   sol_cemit(c, sol_ins_a(node->n_ins.op, opa[0])); break;
-                case SOL_INS_AB:  sol_cemit(c, sol_ins_ab(node->n_ins.op, (uint32_t)opa[0], (uint32_t)opa[1])); break;
-                case SOL_INS_ABC: sol_cemit(c, sol_ins_abc(node->n_ins.op, (uint32_t)opa[0], (uint32_t)opa[1], (uint32_t)opa[2])); break;
+                case SOL_INS_AB:  sol_cemit(c, sol_ins_ab((uint32_t)node->n_ins.op, (uint32_t)opa[0], (uint32_t)opa[1])); break;
+                case SOL_INS_ABC: sol_cemit(c, sol_ins_abc((uint32_t)node->n_ins.op, (uint32_t)opa[0], (uint32_t)opa[1], (uint32_t)opa[2])); break;
             }
             return sol_cnode_ex_ok();
         }

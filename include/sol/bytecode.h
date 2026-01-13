@@ -62,8 +62,8 @@ typedef enum {
 #undef X
     SOL_ERR_COUNT
 } sol_error;
-extern const sf_str SOL_ERR_STRINGS[SOL_ERR_COUNT];
-#define sol_err_string(err) (SOL_ERR_STRINGS[(err)])
+extern const char *SOL_ERR_STRINGS[SOL_ERR_COUNT];
+#define sol_err_string(err) (sf_ref(SOL_ERR_STRINGS[(err)]))
 
 
 #define MASKI(n) ((1U<<(n))-1U)
@@ -138,7 +138,7 @@ typedef enum {
 
     SOL_DCOUNT,
 } sol_dtype;
-extern const sf_str SOL_TYPE_NAMES[(size_t)SOL_TCOUNT + (size_t)SOL_DCOUNT];
+extern const char *SOL_TYPE_NAMES[(size_t)SOL_TCOUNT + (size_t)SOL_DCOUNT];
 
 /// Dynamic allocation header including size, type, and gc info
 typedef struct {
@@ -162,7 +162,7 @@ typedef struct {
 #define SOL_FALSE (sol_val){.tt = SOL_TBOOL, .boolean = false}
 #define VEC_NAME sol_valvec
 #define VEC_T sol_val
-#define SIZE_T uint32_t
+#define VSIZE_T uint32_t
 #include <sf/containers/vec.h>
 
 typedef struct {
@@ -280,7 +280,7 @@ static inline void *sol_uptr(sol_val val) { return (char *)val.dyn + sizeof(sol_
 static inline sf_str sol_typename(sol_val val) {
     if (sol_isdtype(val, SOL_DUSR))
         return sol_uheader(val)->name;
-    return val.tt == SOL_TDYN ? SOL_TYPE_NAMES[(int)SOL_TDYN + 1 + sol_header(val)->tt] : SOL_TYPE_NAMES[val.tt];
+    return sf_lit(val.tt == SOL_TDYN ? SOL_TYPE_NAMES[(int)SOL_TDYN + 1 + sol_header(val)->tt] : SOL_TYPE_NAMES[val.tt]);
 }
 /// Returns whether a usrtype object is of the specified type
 static inline bool sol_isutype(sol_val val, sf_str name) { return sf_str_eq(name, sol_typename(val)); }

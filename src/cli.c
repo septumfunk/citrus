@@ -13,11 +13,6 @@
 #include <ncurses.h>
 #endif
 
-#define TUI_UL  "\x1b[4m"
-#define TUI_BLD "\x1b[1m"
-#define TUI_ERR "\x1b[1;31m"
-#define TUI_CLR "\x1b[0m"
-
 typedef enum {
     CLI_RUN,
     CLI_DBG,
@@ -40,14 +35,15 @@ void cli_highlight_line(sf_str src, sf_str err, uint16_t line, uint16_t column) 
     fprintf(stderr, /* "%d | " */ "%s\n", /* line, */ c);
     *cc = '\n';
 
-    char pointer[column];
-    memset(pointer, '~', sizeof(pointer));
+    char *pointer = malloc(column);
+    memset(pointer, '~', column);
     pointer[sizeof(pointer) - 1] = '\0';
     pointer[sizeof(pointer) - 2] = '^';
 
     if (err.c_str == sol_err_string(SOL_ERRP_EXPECTED_SEMICOLON).c_str)
         fprintf(stderr, TUI_ERR "%s\n" TUI_CLR, err.c_str);
     else fprintf(stderr, TUI_ERR "%s %s\n" TUI_CLR, pointer, err.c_str);
+    free(pointer);
 }
 
 sf_str cli_load_file(char *name) {
@@ -88,7 +84,7 @@ int cli_run(char *path, sf_str src) {
         fprintf(stderr, TUI_ERR "error: %s:%u:%u\n" TUI_CLR, path, line, col);
 
         if (!sf_isempty(call_ex.err.panic)) {
-            sf_str full = sf_str_fmt("%s: %s", sol_err_string(call_ex.err.tt).c_str, call_ex.err.panic.c_str);
+            sf_str full = sf_str_fmt("%s: %s", sol_err_string(call_ex.err.tt), call_ex.err.panic.c_str);
             cli_highlight_line(src, full, line, col);
             sf_str_free(call_ex.err.panic);
             sf_str_free(full);
@@ -136,7 +132,7 @@ int main(int argc, char **argv) {
     if (sf_isempty(src))
         return 1;
 
-    int ret;
+    int ret = 0;
     switch (mode) {
         case CLI_RUN: ret = cli_run(argv[2], src); break;
         case CLI_DBG: ret = sol_cli_cbg(argv[2], src); break;

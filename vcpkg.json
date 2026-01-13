@@ -1,0 +1,12 @@
+{
+  "dependencies": [
+    {
+      "name": "pdcurses",
+      "platform": "windows"
+    },
+    {
+      "name": "ncurses",
+      "platform": "linux | osx"
+    }
+  ]
+}

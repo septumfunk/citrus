@@ -37,7 +37,7 @@ static inline bool sol_isalphan(char c) { return (c >= 'A' && c <= 'Z')|| (c >= 
 
 sol_token sol_scanstr(sol_scanner *s) {
     bool terminated = false;
-    size_t len = 0;
+    uint16_t len = 0;
     for (size_t cc = s->cc + 1; cc < s->src.len; ++cc) {
         char c = s->src.c_str[cc];
         if (c == '"') {
@@ -65,7 +65,7 @@ sol_token sol_scanstr(sol_scanner *s) {
 
 sol_token sol_scannum(sol_scanner *s) {
     bool is_number = false;
-    size_t len = 1;
+    uint16_t len = 1;
     for (size_t cc = s->cc + 1; cc < s->src.len; ++cc) {
         if (s->src.c_str[cc] == '.') {
             if (is_number)
@@ -76,8 +76,7 @@ sol_token sol_scannum(sol_scanner *s) {
         ++len;
     }
 
-    char str[len + 1];
-    memset(str, 0, sizeof(str));
+    char *str = calloc(len + 1, sizeof(char));
     memcpy(str, s->src.c_str + s->cc, len);
     s->cc += len - 1;
     s->current.column += len - 1;
@@ -97,6 +96,7 @@ sol_token sol_scannum(sol_scanner *s) {
             .line = s->current.line,
             .column = s->current.column,
         };
+    free(str);
     return tok;
 }
 
@@ -108,8 +108,7 @@ sol_token sol_scanidentifier(sol_scanner *s) {
         ++len;
     }
 
-    char str[len + 1];
-    memset(str, 0, sizeof(str));
+    char *str = calloc(len + 1, sizeof(char));
     memcpy(str, s->src.c_str + s->cc, len);
 
     s->cc += len - 1;
@@ -127,6 +126,7 @@ sol_token sol_scanidentifier(sol_scanner *s) {
                 value = sf_str_eq(sf_lit(sol_op_info(o)->mnemonic), sf_ref(str)) ?
                     (sol_val){.tt = SOL_TI64, .i64 = o} : value;
         }
+        free(str);
         return (sol_token) {
             .tt = ex.ok,
             .value = value,
@@ -134,9 +134,11 @@ sol_token sol_scanidentifier(sol_scanner *s) {
             .column = s->current.column,
         };
     } else {
+        sf_str ds = sf_str_cdup(str);
+        free(str);
         return (sol_token){
             .tt = TK_IDENTIFIER,
-            .value = sol_dnewstr(sf_str_cdup(str)),
+            .value = sol_dnewstr(ds),
             .line = s->current.line,
             .column = s->current.column,
         };
@@ -254,8 +256,8 @@ sol_scan_ex sol_scan(sf_str src) {
                 sol_keywords_free(&s.keywords);
                 size_t tk_len = s.cc - pcc + 1;
                 for (size_t cc2 = s.cc; cc2 < s.src.len; ++cc2) {
-                    char c = s.src.c_str[cc2];
-                    if (c == ' ' || c == '\n' || c == '\r' || c == '\n')
+                    char ws = s.src.c_str[cc2];
+                    if (ws == ' ' || ws == '\n' || ws == '\r' || ws == '\n')
                         break;
                     ++tk_len;
                 }
@@ -766,7 +768,7 @@ sol_parse_ex sol_pins(sol_parser *p) {
                     (op == SOL_OP_SUPO && i == 1) ||
                     (op == SOL_OP_GUPO && i == 2))) {
                     sol_node_free(vex.ok);
-                    for (int i = 0; i < 3; ++i) sol_ddel(opa[i]);
+                    for (int j = 0; j < 3; ++j) sol_ddel(opa[j]);
                     return sol_perr(SOL_ERRP_EXPECTED_INTEGER);
                 }
                 opa[i] = sol_dref(vex.ok->n_literal);
@@ -774,7 +776,7 @@ sol_parse_ex sol_pins(sol_parser *p) {
             }
             default: {
                 sol_node_free(vex.ok);
-                for (int i = 0; i < 3; ++i) sol_ddel(opa[i]);
+                for (int j = 0; j < 3; ++j) sol_ddel(opa[j]);
                 return sol_perr(SOL_ERRP_EXPECTED_IDENTIFIER);
             }
         }

@@ -78,7 +78,7 @@ sf_str sol_tostring(sol_val val) {
                 case SOL_DCOUNT: return SF_STR_EMPTY;
             }
         }
-        case SOL_TCOUNT: return SF_STR_EMPTY;
+        default: return SF_STR_EMPTY;
     }
 }
 
@@ -154,7 +154,7 @@ sol_val sol_wrapcfun(sol_cfunction fptr, uint32_t arg_c, uint32_t temp_c) {
 static sf_str sol_dirname(sf_str path) {
     const char *slash = strrchr(path.c_str, '/');
 #ifdef _WIN32
-    const char *bslash = strrchr(path, '\\');
+    const char *bslash = strrchr(path.c_str, '\\');
     if (!slash || (bslash && bslash > slash))
         slash = bslash;
 #endif
@@ -267,10 +267,11 @@ sol_call_ex sol_call_bc(sol_state *state, sol_fproto *proto, const sol_val *args
             sol_fproto f = *(sol_fproto *)fun.dyn;
             sol_call_ex fex;
             if (f.arg_c > 0) {
-                sol_val args[f.arg_c];
+                sol_val *argv = calloc(f.arg_c, sizeof(sol_val));
                 for (uint32_t i = 0; i < f.arg_c; ++i)
-                    args[i] = sol_dref(sol_get(state, sol_iabc_c(ins) + i));
-                fex = sol_call(state, &f, args);
+                    argv[i] = sol_dref(sol_get(state, sol_iabc_c(ins) + i));
+                fex = sol_call(state, &f, argv);
+                free(argv);
             } else fex = sol_call(state, &f, NULL);
             if (!fex.is_ok) {
                 fex.err.pc = pc - 1;

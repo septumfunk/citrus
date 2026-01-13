@@ -6,6 +6,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 set(LIBRARY_TYPE STATIC)
 
+# LIB
 project(solus C)
 add_library(${PROJECT_NAME} ${LIBRARY_TYPE}
     src/bytecode.c
@@ -16,15 +17,27 @@ add_library(${PROJECT_NAME} ${LIBRARY_TYPE}
 )
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+
 # CLI
 set(CLI_TARGET solus_cli)
-add_executable(${CLI_TARGET}
-    src/cli.c
-    src/dbg.c
-)
+set(CLI_SOURCES src/cli.c)
+if (WIN32 OR UNIX) # ncurses/pdcurses required
+    list(APPEND CLI_SOURCES src/dbg.c)
+endif()
+add_executable(${CLI_TARGET} ${CLI_SOURCES})
 set_target_properties(${CLI_TARGET} PROPERTIES OUTPUT_NAME "solus")
-target_link_libraries(${CLI_TARGET} PRIVATE ${PROJECT_NAME})
+if(WIN32)
+    find_package(unofficial-pdcurses CONFIG REQUIRED)
+    target_link_libraries(${CLI_TARGET} PRIVATE ${PROJECT_NAME} unofficial::pdcurses::pdcurses)
+elseif(UNIX)
+    find_package(Curses REQUIRED)
+    target_link_libraries(${CLI_TARGET} PRIVATE ${PROJECT_NAME} ${CURSES_LIBRARIES})
+else()
+    target_link_libraries(${CLI_TARGET} PRIVATE ${PROJECT_NAME})
+endif()
 
+
+# Sanitizer
 option(ENABLE_SANITIZERS "Enable sanitizers" OFF)
 if (ENABLE_SANITIZERS AND NOT MSVC)
     message(STATUS "Sanitizers enabled")
@@ -42,12 +55,11 @@ if (ENABLE_SANITIZERS AND NOT MSVC)
 endif()
 
 add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
-if (MSVC)
-    set(COMPILE_OPTIONS /W4 /WX /permissive- /sdl /wd4068)
-else()
-    set(COMPILE_OPTIONS
+if (MSVC) # Good luck if you're on MSVC
+    add_compile_options(/W4 /WX)
+elseif(UNIX)
+    add_compile_options(
         -Wall -Wextra -Werror
-
         -Wpedantic -Wconversion -Wuninitialized
         -Wsign-conversion -Wnull-dereference
     )
@@ -72,15 +84,6 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(sf-std)
 target_link_libraries(${PROJECT_NAME} PUBLIC sf-std)
-
-# Curses
-if (WIN32)
-    target_include_directories(${CLI_TARGET} PUBLIC ${CMAKE_SOURCE_DIR}/deps/pdcurses/include)
-    target_link_libraries(${CLI_TARGET} PUBLIC ${CMAKE_SOURCE_DIR}/deps/pdcurses/lib/pdcurses.lib)
-else()
-    target_include_directories(${CLI_TARGET} PUBLIC ${CMAKE_SOURCE_DIR}/deps/ncurses-6.6/include)
-    target_link_libraries(${CLI_TARGET} PUBLIC ${CMAKE_SOURCE_DIR}/deps/ncurses-6.6/lib/libncurses.a)
-endif()
 
 # CTest
 if (PROJECT_IS_TOP_LEVEL)

@@ -1,6 +1,5 @@
 #include "sol/bytecode.h"
 #include "sol/vm.h"
-#include "sf/math.h"
 #include "sf/str.h"
 #include <sf/fs.h>
 #include <stdint.h>
@@ -8,6 +7,8 @@
 #include <time.h>
 
 #if defined(_WIN32) || defined(_WIN64)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <windows.h>
 double sol_timesec(void) {
     FILETIME ft;
@@ -206,7 +207,7 @@ sol_call_ex sol_std_randi(sol_state *s) {
     uint64_t range = (uint64_t)(max - min) + 1;
 #if defined(_WIN32)
     uint64_t r = ((uint64_t)rand() << 48) | ((uint64_t)rand() << 32) |
-                 ((uint64_t)rand() << 16) | rand();
+                 ((uint64_t)rand() << 16) | (uint64_t)rand();
 #else
     uint64_t r = (uint64_t)rand();
 #endif
@@ -256,7 +257,7 @@ sol_call_ex sol_std_fread(sol_state *s) {
         return sol_call_ex_ok(sol_dnewerr(sf_str_fmt("File '%s' not found", p.c_str)));
     sf_fsb_ex fsb = sf_file_buffer(p);
     if (!fsb.is_ok) {
-        sf_str errs;
+        sf_str errs = sf_lit("File not found");
         switch (fsb.err) {
             case SF_FILE_NOT_FOUND: errs = sf_str_fmt("File '%s' not found", p.c_str); break;
             case SF_OPEN_FAILURE: errs = sf_str_fmt("File '%s' failed to open", p.c_str); break;

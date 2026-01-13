@@ -82,7 +82,8 @@ sol_val sol_dnew(sol_dtype tt) {
         case SOL_DREF: size = sizeof(sol_val); break;
 
         case SOL_DUSR:
-        case SOL_DCOUNT: return SOL_NIL;
+        case SOL_DCOUNT:
+        default: return SOL_NIL;
     }
 
     sol_dyn p = calloc(1, sizeof(sol_dheader) + size);
@@ -155,8 +156,9 @@ void sol_ddel(sol_val val) {
     }
 }
 
-const sf_str SOL_ERR_STRINGS[SOL_ERR_COUNT] = {
-#define X(prefix, name, string) sf_lit(string),
+
+const char *SOL_ERR_STRINGS[SOL_ERR_COUNT] = {
+#define X(prefix, name, string) string,
 #include "sol/error.def"
 #undef X
 };
@@ -269,26 +271,27 @@ const sol_inssig SOL_OP_INFO[SOL_OP_COUNT] = {
     }
 };
 
-const sf_str SOL_TYPE_NAMES[(size_t)SOL_TCOUNT + (size_t)SOL_DCOUNT] = {
-    sf_lit("nil"),
-    sf_lit("f64"),
-    sf_lit("i64"),
-    sf_lit("bool"),
-    sf_lit("dyn"),
+const char *SOL_TYPE_NAMES[(size_t)SOL_TCOUNT + (size_t)SOL_DCOUNT] = {
+    "nil",
+    "f64",
+    "i64",
+    "bool",
+    "dyn",
 
-    sf_lit("str"),
-    sf_lit("err"),
-    sf_lit("obj"),
-    sf_lit("array"),
-    sf_lit("fun"),
-    sf_lit("ref"),
+    "str",
+    "err",
+    "obj",
+    "array",
+    "fun",
+    "ref",
 
-    sf_lit("usr"),
+    "usr",
 };
 
 sf_str sol_dasmi(sol_instruction ins) {
     const char *op = sol_op_info(sol_ins_op(ins))->mnemonic;
     switch (sol_op_info(sol_ins_op(ins))->type) {
+        default:
         case SOL_INS_A: return sf_str_fmt("%-7s%-8d", op, sol_ia_a(ins));
         case SOL_INS_AB: return sf_str_fmt("%-7s%-4u%-4u",  op, sol_iab_a(ins), sol_iab_b(ins)); break;
         case SOL_INS_ABC: return sf_str_fmt("%-7s%-4u%-4u%-4u",  op, sol_iabc_a(ins), sol_iabc_b(ins), sol_iabc_c(ins)); break;

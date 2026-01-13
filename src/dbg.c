@@ -4,11 +4,17 @@
 #include "sol/cli.h"
 #include <limits.h>
 #include <ctype.h>
-#include <ncurses.h>
+
 #include <sf/str.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef _WIN32
+    #include <curses.h>
+#else
+    #include <ncurses.h>
+#endif
 
 #define CMD_MAX 256
 #define DBGOUT_MAX 8192

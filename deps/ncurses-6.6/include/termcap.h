@@ -1,1 +1,0 @@
-ncursesw/termcap.h
