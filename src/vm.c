@@ -625,6 +625,7 @@ ret: {}
     proto->dbg_res = 0;
     proto->dbg_ll = 0;
     sol_popframe(state);
+    sol_dheader *dh = sol_header(return_val); (void)dh;
     if (proto->tt == SOL_FPROTO_BC && !sf_isempty(proto->file_name))
         sf_str_free(sol_filenames_pop(&state->files));
     return sol_call_ex_ok(return_val);

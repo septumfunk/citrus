@@ -1,5 +1,5 @@
 let mod = obj.new();
-mod.mod = mod;
+
 mod.baby = [](var) {
     let x = math.randi(0, 3);
     _g.io.println("(>OwO)>" + string(var));
