@@ -41,6 +41,7 @@ struct sol_tokenvec;
 void _sol_tokenvec_cleanup(struct sol_tokenvec *vec);
 #define VEC_NAME sol_tokenvec
 #define VEC_T sol_token
+#define VSIZE_T uint32_t
 #define CLEANUP_FN _sol_tokenvec_cleanup
 #include <sf/containers/vec.h>
 

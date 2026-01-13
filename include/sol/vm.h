@@ -11,10 +11,12 @@ typedef struct {
 } sol_stackframe;
 #define VEC_NAME sol_frames
 #define VEC_T sol_stackframe
+#define VSIZE_T uint32_t
 #include <sf/containers/vec.h>
 
 #define VEC_NAME sol_filenames
 #define VEC_T sf_str
+#define VSIZE_T uint32_t
 #include <sf/containers/vec.h>
 
 /// The main global state for the VM, responsible for the stack and any globals/caching

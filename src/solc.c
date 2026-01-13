@@ -44,6 +44,7 @@ struct sol_scopes;
 void _sol_scopes_cleanup(struct sol_scopes *);
 #define VEC_NAME sol_scopes
 #define VEC_T sol_scope
+#define VSIZE_T uint32_t
 #define CLEANUP_FN _sol_scopes_cleanup
 #include <sf/containers/vec.h>
 void _sol_scopes_cleanup(struct sol_scopes *v) {
