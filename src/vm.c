@@ -117,7 +117,7 @@ void sol_dpush(sol_state *s, sol_dalloc *ac) {
 }
 
 sol_val sol_dnew(sol_state *s, sol_dtype tt) {
-    size_t size;
+    size_t size = 0;
     switch (tt) {
         case SOL_DSTR: size = sizeof(sf_str); break;
         case SOL_DERR: size = sizeof(sf_str); break;
