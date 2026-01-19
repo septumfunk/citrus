@@ -1,5 +1,5 @@
-# Solus
-  Solus is an embeddable scripting language with a register based VM and a focus on doing everything exactly the way *I* want to. The design of the compiler and VM are both heavily inspired by Lua's, alongside numerous other language semantics. Solus aims to reduce the amount of code required for me to bind my projects' C functions and structs with a high-level dynamically typed scripting language for both rapid prototyping and ease of use for the end user.
+# solus
+  solus is an embeddable scripting language with a register based VM and a focus on doing everything exactly the way *I* want to. The design of the compiler and VM are both heavily inspired by Lua's, alongside numerous other language semantics. Solus aims to reduce the amount of code required for me to bind my projects' C functions and structs with a high-level dynamically typed scripting language for both rapid prototyping and ease of use for the end user.
 
 # Syntax
 ### Statements
