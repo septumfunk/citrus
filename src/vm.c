@@ -283,7 +283,7 @@ void sol_log_op(sol_instruction ins) {
         } \
         proto->dbg_ll = SOL_DBG_LINE(proto->dbg[pc]); \
         ++pc; \
-        if (s->cb > s->lb) \
+        if (s->cb > (size_t)((double)s->lb * SOL_GCSTEP)) \
             sol_dcollect(s); \
         goto *computed[sol_ins_op(ins)]; \
     } while (0)
@@ -394,7 +394,7 @@ sol_call_ex sol_call_bc(sol_state *s, sol_fproto *proto, const sol_val *args, bo
         }
         proto->dbg_ll = SOL_DBG_LINE(proto->dbg[pc]);
         ++pc;
-        if (s->cb > s->lb)
+        if (s->cb > (size_t)((double)s->lb * SOL_GCSTEP))
             sol_dcollect(s);
         switch (sol_ins_op(ins)) {
     #endif
