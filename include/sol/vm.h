@@ -4,7 +4,7 @@
 #include "bytecode.h"
 #include "solc.h"
 
-#define SOL_VM_MAXHEAP 
+#define SOL_GCSTEP 1.5
 
 /// Represents a function's frame, or reserved registers, on the stack
 typedef struct {
