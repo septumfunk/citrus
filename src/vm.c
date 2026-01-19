@@ -204,12 +204,37 @@ sol_val sol_dcopy(sol_state *state, sol_val val) {
     return val;
 }
 
+void sol_dmarkfun(sol_fproto *fp) {
+    for (sol_upvalue *v = fp->upvals; v && v < fp->upvals + fp->up_c; ++v) {
+        if (v->tt == SOL_UP_VAL)
+            sol_dheader(v->value)->mark = SOL_DYN_WHITE;
+    }
+}
+
 void sol_dcollect_obj(void *ud, sf_str _k, sol_val member) {
     (void)_k;
     if (member.tt != SOL_TDYN || sol_dheader(member)->mark != SOL_DYN_WHITE) return;
     sol_dheader(member)->mark = SOL_DYN_BLACK;
     if (sol_dtypeof(member) == SOL_DOBJ)
         sol_dobj_foreach(member.dyn, sol_dcollect_obj, ud);
+    else if (sol_dtypeof(member) == SOL_DFUN)
+        sol_dmarkfun(member.dyn);
+}
+
+void sol_dmarkref(sol_val *r) {
+    sol_val inner = sol_dval(*r);
+    while (inner.tt == SOL_TDYN) {
+        if (sol_dtypeof(inner) == SOL_DOBJ)
+            sol_dobj_foreach(inner.dyn, sol_dcollect_obj, NULL);
+        else if (sol_dtypeof(inner) == SOL_DFUN)
+            sol_dmarkfun(inner.dyn);
+        else if (sol_dtypeof(inner) == SOL_DREF)
+            inner = sol_dval(inner);
+        else {
+            sol_dheader(inner)->mark = SOL_DYN_BLACK;
+            break;
+        }
+    }
 }
 
 void sol_dcollect(sol_state *state) {
@@ -221,20 +246,10 @@ void sol_dcollect(sol_state *state) {
 
             if (ac->tt == SOL_DOBJ)
                 sol_dobj_foreach(r->dyn, sol_dcollect_obj, NULL);
-
-            if (ac->tt == SOL_DREF) {
-                sol_val inner = sol_dval(*r);
-                while (inner.tt == SOL_TDYN) {
-                    if (sol_dtypeof(inner) == SOL_DOBJ)
-                        sol_dobj_foreach(inner.dyn, sol_dcollect_obj, NULL);
-                    else if (sol_dtypeof(inner) == SOL_DREF)
-                        inner = sol_dval(inner);
-                    else {
-                        sol_dheader(inner)->mark = SOL_DYN_BLACK;
-                        break;
-                    }
-                }
-            }
+            if (ac->tt == SOL_DFUN)
+                sol_dmarkfun((sol_fproto *)((char *)ac + sizeof(sol_dalloc)));
+            if (ac->tt == SOL_DREF)
+                sol_dmarkref(r);
         }
     }
     sol_dobj_foreach(state->global.dyn, sol_dcollect_obj, NULL);
