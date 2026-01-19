@@ -213,7 +213,7 @@ void sol_dcollect_obj(void *ud, sf_str _k, sol_val member) {
 }
 
 void sol_dcollect(sol_state *state) {
-    state->lb = state->cb;
+    state->lb = 0;
     for (sol_val *r = state->stack.data; r < state->stack.data + state->stack.count; ++r) {
         if (r->tt == SOL_TDYN) {
             sol_dalloc *ac = sol_dheader(*r);
@@ -247,6 +247,7 @@ void sol_dcollect(sol_state *state) {
             sol_dclean((sol_val){SOL_TDYN, .dyn = dead + 1});
             continue;
         }
+        state->lb += (*ac)->size;
         (*ac)->mark = SOL_DYN_WHITE;
         ac = &(*ac)->next;
     }
