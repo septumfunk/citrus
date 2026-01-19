@@ -1,6 +1,14 @@
-let mod = panic(eval(panic(io.fread("sol.tests/my_mod.sol"))));
+let mod = obj.new();
+
+mod.baby = []() {
+    let x = "kys" + "lol";
+    x = x + "omg";
+    x = math.randi(-256, 256);
+    return x;
+};
+
 let x = 0;
-while x < 3 {
-    mod.baby(x);
+while x == x {
+    mod.baby();
     x = x + 1;
 }
