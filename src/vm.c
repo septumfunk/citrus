@@ -18,6 +18,7 @@ sol_state *sol_state_new(void) {
         .stack = sol_valvec_new(),
         .files = sol_filenames_new(),
         .global = {SOL_TDYN, .dyn = p},
+        .lb = 1<<20, .cb = 0,
     };
     sol_filenames_push(&s->files, sf_lit("./"));
     return s;
@@ -105,6 +106,16 @@ sf_str sol_stackdump(sol_state *state) {
     return out;
 }
 
+void sol_dpush(sol_state *s, sol_dalloc *ac) {
+    sol_dalloc *dd = s->alloc;
+    if (dd == NULL) s->alloc = ac;
+    else {
+        while (dd->next) dd = dd->next;
+        dd->next = ac;
+    }
+    s->cb += ac->size;
+}
+
 sol_val sol_dnew(sol_state *s, sol_dtype tt) {
     size_t size;
     switch (tt) {
@@ -144,44 +155,51 @@ sol_val sol_dnew(sol_state *s, sol_dtype tt) {
         }
     }
 
-    sol_dalloc *dd = s->alloc;
-    if (dd == NULL) s->alloc = dh;
-    else {
-        while (dd->next) dd = dd->next;
-        dd->next = dh;
-    }
+    sol_dpush(s, dh);
     return (sol_val){ .tt = SOL_TDYN, .dyn = p };
+}
+
+sol_val sol_dscopy(sol_state *state, sol_val val) {
+    if (val.tt != SOL_TDYN)
+        return val; // This function only needs to copy dynamic constants
+
+    sol_dalloc *ac = malloc(sizeof(sol_dalloc) + sol_dheader(val)->size);
+    *ac = *(sol_dheader(val));
+    ac->size = sol_dheader(val)->size;
+    ac->mark = SOL_DYN_WHITE;
+    ac->next = NULL;
+    sol_val nv = (sol_val){SOL_TDYN, .dyn=(char*)ac + sizeof(sol_dalloc)};
+    ac->mark = SOL_DYN_WHITE;
+    ac->next = NULL;
+
+    switch (sol_dheader(nv)->tt) {
+        case SOL_DSTR:
+            *(sf_str *)nv.dyn = sf_str_dup(*(sf_str *)val.dyn);
+            break;
+        case SOL_DFUN: {
+            sol_fproto *fp = val.dyn, *nfp = nv.dyn;
+            memcpy(nfp, fp, sizeof(sol_fproto));
+            nfp->file_name = sf_str_dup(fp->file_name);
+            nfp->constants = sol_valvec_new();
+            nfp->code = malloc(sizeof(sol_instruction) * fp->code_c);
+            nfp->dbg = malloc(sizeof(sol_dbg) * fp->code_c);
+            nfp->upvals = malloc(sizeof(sol_upvalue) * nfp->up_c);
+            memcpy(nfp->code, fp->code, sizeof(sol_instruction) * fp->code_c);
+            memcpy(nfp->dbg, fp->dbg, sizeof(sol_dbg) * fp->code_c);
+            memcpy(nfp->upvals, fp->upvals, sizeof(sol_upvalue) * nfp->up_c);
+            for (sol_val *v = fp->constants.data; v < fp->constants.data + fp->constants.count; ++v)
+                sol_valvec_push(&nfp->constants, sol_dscopy(state, *v));
+            break;
+        }
+        default: return SOL_NIL;
+    }
+    return nv;
 }
 
 sol_val sol_dcopy(sol_state *state, sol_val val) {
     if (val.tt == SOL_TDYN) {
-        size_t size = sizeof(sol_dalloc) + sol_dheader(val)->size;
-        sol_dalloc *ac = malloc(size);
-        memcpy(ac, (char *)val.dyn - sizeof(sol_dalloc), size);
-        sol_val nv = (sol_val){SOL_TDYN, .dyn=ac + 1};
-        sol_dheader(nv)->mark = SOL_DYN_WHITE;
-
-        switch (sol_dheader(nv)->tt) {
-            case SOL_DSTR:
-                *(sf_str *)nv.dyn = sf_str_dup(*(sf_str *)nv.dyn);
-                break;
-            case SOL_DFUN: {
-                sol_fproto *fp = val.dyn, *nfp = nv.dyn;
-                nfp->file_name = sf_str_dup(fp->file_name);
-                nfp->constants = sol_valvec_new();
-                nfp->code = malloc(sizeof(sol_instruction) * fp->code_c);
-                nfp->dbg = malloc(sizeof(sol_dbg) * fp->code_c);
-                nfp->upvals = malloc(sizeof(sol_upvalue) * nfp->up_c);
-                memcpy(nfp->code, fp->code, sizeof(sol_instruction) * fp->code_c);
-                memcpy(nfp->dbg, fp->dbg, sizeof(sol_dbg) * fp->code_c);
-                memcpy(nfp->upvals, fp->upvals, sizeof(sol_upvalue) * nfp->up_c);
-                for (sol_val *v = fp->constants.data; v < fp->constants.data + fp->constants.count; ++v)
-                    sol_valvec_push(&nfp->constants, sol_dcopy(state, *v));
-                break;
-            }
-            default: return SOL_NIL; // TODO: THIS
-        }
-        return nv;
+        val = sol_dscopy(state, val);
+        sol_dpush(state, sol_dheader(val));
     }
     return val;
 }
@@ -195,14 +213,16 @@ void sol_dcollect_obj(void *ud, sf_str _k, sol_val member) {
 }
 
 void sol_dcollect(sol_state *state) {
+    state->lb = state->cb;
     for (sol_val *r = state->stack.data; r < state->stack.data + state->stack.count; ++r) {
         if (r->tt == SOL_TDYN) {
-            sol_dheader(*r)->mark = SOL_DYN_BLACK;
+            sol_dalloc *ac = sol_dheader(*r);
+            ac->mark = SOL_DYN_BLACK;
 
-            if (sol_dtypeof(*r) == SOL_DOBJ)
+            if (ac->tt == SOL_DOBJ)
                 sol_dobj_foreach(r->dyn, sol_dcollect_obj, NULL);
 
-            if (sol_dtypeof(*r) == SOL_DREF) {
+            if (ac->tt == SOL_DREF) {
                 sol_val inner = sol_dval(*r);
                 while (inner.tt == SOL_TDYN) {
                     if (sol_dtypeof(inner) == SOL_DOBJ)
@@ -263,6 +283,8 @@ void sol_log_op(sol_instruction ins) {
         } \
         proto->dbg_ll = SOL_DBG_LINE(proto->dbg[pc]); \
         ++pc; \
+        if (s->cb > s->lb) \
+            sol_dcollect(s); \
         goto *computed[sol_ins_op(ins)]; \
     } while (0)
 #   pragma GCC diagnostic push
@@ -372,6 +394,8 @@ sol_call_ex sol_call_bc(sol_state *s, sol_fproto *proto, const sol_val *args, bo
         }
         proto->dbg_ll = SOL_DBG_LINE(proto->dbg[pc]);
         ++pc;
+        if (s->cb > s->lb)
+            sol_dcollect(s);
         switch (sol_ins_op(ins)) {
     #endif
         CASE(SOL_OP_LOAD) {
@@ -728,6 +752,7 @@ sol_call_ex sol_call_bc(sol_state *s, sol_fproto *proto, const sol_val *args, bo
             if (!sol_isdtype(kkey, SOL_DSTR))
                 return sol_callerr(SOL_ERRV_TYPE_MISMATCH, "Expected str at k[%d], found %s.", sol_iabc_c(ins), sol_typename(kkey).c_str);
 
+            sol_dalloc *dh = sol_dheader(kkey); (void)dh;
             sol_dobj_ex ex = sol_dobj_get((sol_dobj *)upo.dyn, *(sf_str *)kkey.dyn);
             if (!ex.is_ok) {
                 sol_set(s, sol_iabc_a(ins), sol_dnerr(s, sf_str_fmt("obj u[%d], does not contain member '%s'.", sol_iabc_b(ins), ((sf_str *)kkey.dyn)->c_str)));

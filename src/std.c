@@ -277,7 +277,7 @@ sol_call_ex sol_std_fread(sol_state *s) {
 }
 sol_call_ex sol_std_fwrite(sol_state *s) {
     sol_val path = sol_get(s, 0);
-    sol_val str = sol_get(s, 0);
+    sol_val str = sol_get(s, 1);
     if (!sol_isdtype(path, SOL_DSTR))
         return sol_call_ex_err((sol_call_err){SOL_ERRV_TYPE_MISMATCH,
             sf_str_fmt("Arg 'path' expected str, found '%s'", sol_typename(path).c_str),

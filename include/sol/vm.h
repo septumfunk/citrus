@@ -4,6 +4,8 @@
 #include "bytecode.h"
 #include "solc.h"
 
+#define SOL_VM_MAXHEAP 
+
 /// Represents a function's frame, or reserved registers, on the stack
 typedef struct {
     uint32_t bottom_o;
@@ -28,6 +30,7 @@ typedef struct sol_state {
     bool dbg;
 
     sol_dalloc *alloc;
+    size_t lb, cb;
 } sol_state;
 EXPORT sol_state *sol_state_new(void);
 EXPORT void sol_state_free(sol_state *state);

@@ -1,16 +1,14 @@
 let mod = obj.new();
 
-mod.baby = [](var) {
-    let wow = "lol ";
-    let b = wow + wow;
-    wow = wow + wow + wow;
-    wow = wow + wow + wow + wow;
-    let x = math.randi(0, 3);
+mod.baby = []() {
+    let x = "kys" + "lol";
+    x = x + "omg";
+    x = math.randi(-256, 256);
+    return x;
 };
 
 let x = 0;
 while x == x {
-    mod.baby(x);
+    mod.baby();
     x = x + 1;
-    collect();
 }
