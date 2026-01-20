@@ -53,6 +53,7 @@ void _sol_keywords_cleanup(struct sol_keywords *vec);
 #define EQUAL_FN(s1, s2) (sf_str_eq(s1, s2))
 #define HASH_FN(s) (sf_str_hash(s))
 #define CLEANUP_FN _sol_keywords_cleanup
+#define KCLEANUP sf_str_free
 #include <sf/containers/map.h>
 
 typedef struct {

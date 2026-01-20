@@ -7,18 +7,21 @@
 #define MAP_V sf_str
 #define EQUAL_FN sf_str_eq
 #define HASH_FN sf_str_hash
+#define KCLEANUP sf_str_free
 #include <sf/containers/map.h>
 #define MAP_NAME sol_cmap
 #define MAP_K sf_str
 #define MAP_V sol_i64
 #define EQUAL_FN sf_str_eq
 #define HASH_FN sf_str_hash
+#define KCLEANUP sf_str_free
 #include <sf/containers/map.h>
 #define MAP_NAME sol_opmap
 #define MAP_K sf_str
 #define MAP_V const sol_inssig *
 #define EQUAL_FN sf_str_eq
 #define HASH_FN sf_str_hash
+#define KCLEANUP sf_str_free
 #include <sf/containers/map.h>
 
 void _dobj_foreach(void *_u, sf_str k, sol_val _v) { (void)_u;(void)_v; sf_str_free(k); }
