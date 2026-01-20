@@ -294,6 +294,7 @@ typedef struct {
 } sol_parser;
 
 void sol_node_free(sol_node *tree) {
+    if (!tree) return;
     switch (tree->tt) {
         case SOL_ND_MEMBER:
             sol_node_free(tree->n_postfix.expr);
@@ -811,40 +812,36 @@ sol_parse_ex sol_pobj(sol_parser *p) {
 
 sol_parse_ex sol_pwhile(sol_parser *p) {
     ++p->tok;
+
+    sol_parse_ex cond = sol_pexpr(p, 0);
+    if (!cond.is_ok)
+        return cond;
+    if (cond.ok->tt != SOL_ND_BINARY || !sol_niscondition(cond.ok)) {
+        uint16_t line = cond.ok->line;
+        uint16_t column = cond.ok->column;
+        sol_node_free(cond.ok);
+        return sol_parse_ex_err((sol_parse_err){SOL_ERRP_EXPECTED_CONDITION, line, column});
+    }
+    if (p->tok->tt != TK_LEFT_BRACE) {
+        sol_node_free(cond.ok);
+        return sol_perr(SOL_ERRP_EXPECTED_BLOCK);
+    }
+
+    sol_parse_ex block = sol_pblock(p);
+    if (!block.is_ok) {
+        sol_node_free(cond.ok);
+        return block;
+    }
+
     sol_node *n_while = malloc(sizeof(sol_node));
     *n_while = (sol_node){
         .tt = SOL_ND_WHILE,
         .line = p->tok->line, .column = p->tok->column,
         .n_while = {
-            .condition = NULL,
-            .block = NULL,
+            .condition = cond.ok,
+            .block = block.ok,
         },
     };
-
-    sol_parse_ex ex = sol_pexpr(p, 0);
-    if (!ex.is_ok) {
-        sol_node_free(n_while);
-        return ex;
-    }
-
-    n_while->n_while.condition = ex.ok;
-    if (ex.ok->tt != SOL_ND_BINARY || !sol_niscondition(ex.ok)) {
-        uint16_t line = ex.ok->line;
-        uint16_t column = ex.ok->column;
-        return sol_parse_ex_err((sol_parse_err){SOL_ERRP_EXPECTED_CONDITION, line, column});
-    }
-
-    if (p->tok->tt != TK_LEFT_BRACE) {
-        sol_node_free(n_while);
-        return sol_perr(SOL_ERRP_EXPECTED_BLOCK);
-    }
-
-    ex = sol_pblock(p);
-    if (!ex.is_ok) {
-        sol_node_free(n_while);
-        return ex;
-    }
-    n_while->n_while.block = ex.ok;
 
     return sol_parse_ex_ok(n_while);
 }
