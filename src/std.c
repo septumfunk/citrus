@@ -102,9 +102,7 @@ sol_call_ex sol_std_import(sol_state *s) {
     sol_call_ex cl_ex = sol_call(s, &cm_ex.ok, NULL, 0);
     sol_fproto_free(&cm_ex.ok);
     if (!cl_ex.is_ok)
-            return sol_call_ex_ok(sol_dnerr(s, sf_str_dup(cl_ex.err.tt == SOL_ERRV_PANIC ?
-                cl_ex.err.panic :
-                sol_err_string(cm_ex.err.tt))
+            return sol_call_ex_ok(sol_dnerr(s, sf_str_dup(cl_ex.err.panic)
             ));
     return cl_ex;
 }

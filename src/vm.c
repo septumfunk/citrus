@@ -183,10 +183,20 @@ sol_val sol_dscopy(sol_state *state, sol_val val) {
             nfp->constants = sol_valvec_new();
             nfp->code = malloc(sizeof(sol_instruction) * fp->code_c);
             nfp->dbg = malloc(sizeof(sol_dbg) * fp->code_c);
+
+            // Deref Upvals
             nfp->upvals = malloc(sizeof(sol_upvalue) * nfp->up_c);
+            for (uint32_t i = 0; i < nfp->up_c; ++i) {
+                sol_upvalue upv = fp->upvals[i];
+                nfp->upvals[i] = (sol_upvalue){
+                    sf_str_dup(upv.name),
+                    SOL_UP_VAL,
+                    .value = upv.tt == SOL_UP_REF ? sol_get(state, upv.ref) : upv.value,
+                };
+            }
+
             memcpy(nfp->code, fp->code, sizeof(sol_instruction) * fp->code_c);
             memcpy(nfp->dbg, fp->dbg, sizeof(sol_dbg) * fp->code_c);
-            memcpy(nfp->upvals, fp->upvals, sizeof(sol_upvalue) * nfp->up_c);
             for (sol_val *v = fp->constants.data; v < fp->constants.data + fp->constants.count; ++v)
                 sol_valvec_push(&nfp->constants, sol_dscopy(state, *v));
             break;

@@ -34,6 +34,7 @@ struct sol_scope;
 #define MAP_V sol_local
 #define EQUAL_FN sf_str_eq
 #define HASH_FN sf_str_hash
+#define KCLEANUP sf_str_free
 #include <sf/containers/map.h>
 
 struct sol_scopes;
@@ -333,7 +334,7 @@ sol_cnode_ex sol_cnode(sol_compiler *c, sol_node *node, uint32_t t_reg) {
                         sol_cemit(c, sol_ins_ab(SOL_OP_LOAD, name, name_i));
                         if (node->n_binary.op != TK_EQUAL) {
                             ot = sol_rtemp(c);
-                            sol_cemit(c, sol_ins_abc(SOL_OP_GET, ot, obj, name_i));
+                            sol_cemit(c, sol_ins_abc(SOL_OP_GET, ot, obj, name));
                             sol_cemit(c, sol_ins_abc(node->n_binary.op == TK_PLUS_EQUAL ? SOL_OP_ADD : SOL_OP_SUB, ot, ot, right));
                         }
                         sol_cemit(c, sol_ins_abc(SOL_OP_SET, obj, name, ot));

@@ -216,6 +216,7 @@ void _sol_dobj_cleanup(struct sol_dobj *obj);
 #define EQUAL_FN(s1, s2) (sf_str_eq(s1, s2))
 #define HASH_FN(s) (sf_str_hash(s))
 #define CLEANUP_FN _sol_dobj_cleanup
+#define KCLEANUP sf_str_free
 #include <sf/containers/map.h>
 typedef sol_fproto *sol_dfun;
 
