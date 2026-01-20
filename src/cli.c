@@ -32,7 +32,7 @@ void cli_highlight_line(sf_str src, sf_str err, uint16_t line, uint16_t column) 
             break;
         } else ++c;
     }
-    fprintf(stderr, /* "%d | " */ "%s\n", /* line, */ c);
+    fprintf(stderr, "%u | %s\n", line, c);
     *cc = '\n';
 
     char *pointer = malloc(column);
@@ -40,9 +40,10 @@ void cli_highlight_line(sf_str src, sf_str err, uint16_t line, uint16_t column) 
     pointer[sizeof(pointer) - 1] = '\0';
     pointer[sizeof(pointer) - 2] = '^';
 
-    if (err.c_str == sol_err_string(SOL_ERRP_EXPECTED_SEMICOLON).c_str)
+    // TODO: Column fix
+    //if (err.c_str == sol_err_string(SOL_ERRP_EXPECTED_SEMICOLON).c_str)
         fprintf(stderr, TUI_ERR "%s\n" TUI_CLR, err.c_str);
-    else fprintf(stderr, TUI_ERR "%s %s\n" TUI_CLR, pointer, err.c_str);
+    //else fprintf(stderr, TUI_ERR "%s %s\n" TUI_CLR, pointer, err.c_str);
     free(pointer);
 }
 

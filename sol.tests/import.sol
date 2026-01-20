@@ -8,7 +8,8 @@ mod.baby = []() {
 };
 
 let x = 0;
-while x == x {
+let b = true;
+while !b {
     mod.baby();
     x = x + 1;
 }
