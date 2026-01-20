@@ -177,6 +177,11 @@ const sol_inssig SOL_OP_INFO[SOL_OP_COUNT] = {
         .type = SOL_INS_A,
     },
 
+    [SOL_OP_NEW] = {
+        .opcode = SOL_OP_NEW,
+        .mnemonic = "NEW",
+        .type = SOL_INS_A,
+    },
     [SOL_OP_SET] = {
         .opcode = SOL_OP_SET,
         .mnemonic = "SET",

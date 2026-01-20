@@ -7,16 +7,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// Define SOL_DBG_LOG to get debug output from the compiler and vm
-//#define SOL_DBG_LOG true
-
-#ifdef SOL_DBG_LOG
-#define sol_log(lit) printf(lit"\n")
-#define sol_logf(lit, ...) printf(lit"\n", __VA_ARGS__)
-#else
-#define sol_log(lit)
-#define sol_logf(lit, ...)
-#endif
+#define SOL_VERSION "0.3"
+#define SOL_GIT "https://github.com/septumfunk/solus"
 
 typedef enum {
     SOL_INS_A, // A: i26 (jmp)
@@ -45,6 +37,7 @@ typedef enum {
     SOL_OP_GETU,
     SOL_OP_REFU,
 
+    SOL_OP_NEW,
     SOL_OP_SET,
     SOL_OP_GET,
 

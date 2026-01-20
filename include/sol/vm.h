@@ -133,7 +133,7 @@ typedef struct {
 #define EXPECTED_O sol_val
 #define EXPECTED_E sol_call_err
 #include <sf/containers/expected.h>
-EXPORT sol_call_ex sol_call(sol_state *state, sol_fproto *proto, const sol_val *args);
-EXPORT sol_call_ex sol_dcall(sol_state *state, sol_fproto *proto, const sol_val *args, bool *bps);
+EXPORT sol_call_ex sol_call(sol_state *state, sol_fproto *proto, const sol_val *args, uint32_t arg_c);
+EXPORT sol_call_ex sol_dcall(sol_state *state, sol_fproto *proto, const sol_val *args, uint32_t arg_c, bool *bps);
 
 #endif // VM_H

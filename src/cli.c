@@ -79,7 +79,7 @@ int cli_run(char *path, sf_str src) {
     }
 
     sol_fproto *fun = &comp_ex.ok;
-    sol_call_ex call_ex = sol_call(s, fun, NULL);
+    sol_call_ex call_ex = sol_call(s, fun, NULL, 0);
     if (!call_ex.is_ok) {
         uint16_t line = SOL_DBG_LINE(fun->dbg[call_ex.err.pc]), col = SOL_DBG_COL(fun->dbg[call_ex.err.pc]);
         fprintf(stderr, TUI_ERR "error: %s:%u:%u\n" TUI_CLR, path, line, col);

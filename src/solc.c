@@ -291,19 +291,32 @@ sol_cnode_ex sol_cnode(sol_compiler *c, sol_node *node, uint32_t t_reg) {
             sol_cnode_ex right_ex = sol_cnode(c, node->n_binary.right, right);
             if (!right_ex.is_ok) return right_ex;
 
+            uint32_t ot = right;
             switch (node->n_binary.op) {
+                case TK_PLUS_EQUAL:
+                case TK_MINUS_EQUAL:
                 case TK_EQUAL: {
                     if (node->n_binary.left->tt == SOL_ND_IDENTIFIER) {
                         sol_local loc;
-                        if (sol_lexists(c, *(sf_str *)node->n_binary.left->n_identifier.dyn, &loc)) // Local/Upval
-                            sol_cemit(c, loc.upval ? sol_ins_ab(SOL_OP_SETU, loc.reg, right) : sol_ins_ab(SOL_OP_MOVE, loc.reg, right));
-                        else { // Global
+                        if (sol_lexists(c, *(sf_str *)node->n_binary.left->n_identifier.dyn, &loc)) { // Local/Upval
+                            if (node->n_binary.op != TK_EQUAL) {
+                                ot = sol_rtemp(c);
+                                sol_cemit(c, sol_ins_ab(loc.upval ? SOL_OP_GETU : SOL_OP_MOVE, ot, loc.reg));
+                                sol_cemit(c, sol_ins_abc(node->n_binary.op == TK_PLUS_EQUAL ? SOL_OP_ADD : SOL_OP_SUB, ot, ot, right));
+                            }
+                            sol_cemit(c, loc.upval ? sol_ins_ab(SOL_OP_SETU, loc.reg, ot) : sol_ins_ab(SOL_OP_MOVE, loc.reg, ot));
+                        } else { // Global
                             uint32_t name_i;
                             if (!sol_kfind(c, node->n_binary.left->n_identifier, &name_i)) {
                                 sol_kadd(c, node->n_binary.left->n_identifier);
                                 name_i = c->proto.constants.count - 1;
                             }
-                            sol_cemit(c, sol_ins_abc(SOL_OP_SUPO, 0, name_i, right)); // state->global
+                            if (node->n_binary.op != TK_EQUAL) {
+                                ot = sol_rtemp(c);
+                                sol_cemit(c, sol_ins_abc(SOL_OP_GUPO, ot, 0, name_i));
+                                sol_cemit(c, sol_ins_abc(node->n_binary.op == TK_PLUS_EQUAL ? SOL_OP_ADD : SOL_OP_SUB, ot, ot, right));
+                            }
+                            sol_cemit(c, sol_ins_abc(SOL_OP_SUPO, 0, name_i, ot)); // state->global
                         }
                     } else if (node->n_binary.left->tt == SOL_ND_MEMBER) { // Member Assign
                         uint32_t obj = sol_rtemp(c), name = sol_rtemp(c);
@@ -318,10 +331,16 @@ sol_cnode_ex sol_cnode(sol_compiler *c, sol_node *node, uint32_t t_reg) {
                         }
 
                         sol_cemit(c, sol_ins_ab(SOL_OP_LOAD, name, name_i));
-                        sol_cemit(c, sol_ins_abc(SOL_OP_SET, obj, name, right));
+                        if (node->n_binary.op != TK_EQUAL) {
+                            ot = sol_rtemp(c);
+                            sol_cemit(c, sol_ins_abc(SOL_OP_GET, ot, obj, name_i));
+                            sol_cemit(c, sol_ins_abc(node->n_binary.op == TK_PLUS_EQUAL ? SOL_OP_ADD : SOL_OP_SUB, ot, ot, right));
+                        }
+                        sol_cemit(c, sol_ins_abc(SOL_OP_SET, obj, name, ot));
                         sol_ctemps(c, 2);
                     } else return sol_cerr(SOL_ERRC_INVALID_ASSIGN);
                     sol_ctemps(c, 2);
+                    if (ot != right) sol_ctemps(c, 1);
                     return sol_cnode_ex_ok();
                 }
 
@@ -582,6 +601,25 @@ sol_cnode_ex sol_cnode(sol_compiler *c, sol_node *node, uint32_t t_reg) {
             sol_cnode_ex ex = sol_cnode(c, node->n_return, r);
             if (!ex.is_ok) return ex;
             sol_cemit(c, sol_ins_a(SOL_OP_RET, r));
+            return sol_cnode_ex_ok();
+        }
+
+        case SOL_ND_OBJ: {
+            sol_cemit(c, sol_ins_a(SOL_OP_NEW, t_reg));
+            uint32_t nt = sol_rtemp(c), it = sol_rtemp(c);
+            for (uint32_t i = 0; i < node->n_obj.mem_c; ++i) {
+                sol_node *nd = node->n_obj.members[i];
+                uint32_t name_i;
+                if (!sol_kfind(c, nd->n_binary.left->n_identifier, &name_i)) {
+                    sol_kadd(c, nd->n_binary.left->n_identifier);
+                    name_i = c->proto.constants.count - 1;
+                }
+                sol_cnode_ex right = sol_cnode(c, nd->n_binary.right, it);
+                if (!right.is_ok) return right;
+                sol_cemit(c, sol_ins_ab(SOL_OP_LOAD, nt, name_i));
+                sol_cemit(c, sol_ins_abc(SOL_OP_SET, t_reg, nt, it));
+            }
+            sol_ctemps(c, 2);
             return sol_cnode_ex_ok();
         }
 

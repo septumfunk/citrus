@@ -340,9 +340,9 @@ static sf_str sol_dirname(sf_str path) {
     return sf_own(out);
 }
 
-sol_call_ex sol_call_cfun(sol_state *state, sol_fproto *proto, const sol_val *args) {
+sol_call_ex sol_call_cfun(sol_state *state, sol_fproto *proto, const sol_val *args, uint32_t arg_c) {
     sol_pushframe(state, proto->reg_c);
-    for (uint32_t i = 0; i < proto->arg_c && args; ++i)
+    for (uint32_t i = 0; i < proto->arg_c && args && i < arg_c; ++i)
         sol_set(state, i, args[i]);
 
     sol_call_ex ex = proto->c_fun(state);
@@ -350,7 +350,7 @@ sol_call_ex sol_call_cfun(sol_state *state, sol_fproto *proto, const sol_val *ar
     return ex;
 }
 
-sol_call_ex sol_call_bc(sol_state *s, sol_fproto *proto, const sol_val *args, bool *bps) {
+sol_call_ex sol_call_bc(sol_state *s, sol_fproto *proto, const sol_val *args, uint32_t arg_c, bool *bps) {
     if (proto->tt == SOL_FPROTO_BC && !sf_isempty(proto->file_name))
         sol_filenames_push(&s->files, sol_dirname(proto->file_name));
     #ifdef COMPUTE_GOTOS
@@ -375,6 +375,7 @@ sol_call_ex sol_call_bc(sol_state *s, sol_fproto *proto, const sol_val *args, bo
         LABEL(SOL_OP_GETU),
         LABEL(SOL_OP_REFU),
 
+        LABEL(SOL_OP_NEW),
         LABEL(SOL_OP_SET),
         LABEL(SOL_OP_GET),
 
@@ -389,7 +390,7 @@ sol_call_ex sol_call_bc(sol_state *s, sol_fproto *proto, const sol_val *args, bo
     uint32_t pc = proto->dbg_res ? proto->dbg_res : proto->entry;
     if (!proto->dbg_res) {
         sol_pushframe(s, proto->reg_c);
-        for (uint32_t i = 0; i < proto->arg_c && args; ++i)
+        for (uint32_t i = 0; i < proto->arg_c && args && i < arg_c; ++i)
             sol_set(s, i, args[i]);
     }
     proto->dbg_res = 0;
@@ -441,11 +442,12 @@ sol_call_ex sol_call_bc(sol_state *s, sol_fproto *proto, const sol_val *args, bo
             sol_call_ex fex;
             if (f.arg_c > 0) {
                 sol_val *argv = calloc(f.arg_c, sizeof(sol_val));
-                for (uint32_t i = 0; i < f.arg_c; ++i)
-                    argv[i] = sol_get(s, sol_iabc_c(ins) + i);
-                fex = sol_call(s, &f, argv);
+                uint32_t argc = 0;
+                for (; argc < f.arg_c && argc < s->frames.data[s->frames.count - 1].size; ++argc)
+                    argv[argc] = sol_get(s, sol_iabc_c(ins) + argc);
+                fex = sol_call(s, &f, argv, argc);
                 free(argv);
-            } else fex = sol_call(s, &f, NULL);
+            } else fex = sol_call(s, &f, NULL, 0);
             if (!fex.is_ok) {
                 fex.err.pc = pc - 1;
                 return fex;
@@ -732,6 +734,10 @@ sol_call_ex sol_call_bc(sol_state *s, sol_fproto *proto, const sol_val *args, bo
             DISPATCH();
         }
 
+        CASE(SOL_OP_NEW) {
+            sol_set(s, (uint32_t)sol_ia_a(ins), sol_dnew(s, SOL_DOBJ));
+            DISPATCH();
+        }
         CASE(SOL_OP_SET) {
             sol_val obj = sol_get(s, sol_iabc_a(ins));
             sol_val key = sol_get(s, sol_iabc_b(ins));
@@ -805,16 +811,16 @@ ret: {}
     return sol_call_ex_ok(return_val);
 }
 
-sol_call_ex sol_call(sol_state *state, sol_fproto *proto, const sol_val *args) {
+sol_call_ex sol_call(sol_state *state, sol_fproto *proto, const sol_val *args, uint32_t arg_c) {
     if (proto->tt == SOL_FPROTO_BC)
-        return sol_call_bc(state, proto, args, NULL);
-    return sol_call_cfun(state, proto, args);
+        return sol_call_bc(state, proto, args, arg_c, NULL);
+    return sol_call_cfun(state, proto, args, arg_c);
 }
 
-sol_call_ex sol_dcall(sol_state *state, sol_fproto *proto, const sol_val *args, bool *bps) {
+sol_call_ex sol_dcall(sol_state *state, sol_fproto *proto, const sol_val *args, uint32_t arg_c, bool *bps) {
     if (proto->tt == SOL_FPROTO_BC)
-        return sol_call_bc(state, proto, args, bps);
-    return sol_call_cfun(state, proto, args);
+        return sol_call_bc(state, proto, args, arg_c, bps);
+    return sol_call_cfun(state, proto, args, arg_c);
 }
 
 #if (defined(__GNUC__) || defined(__clang__)) && !defined(SOL_DBG_NOCOMPUTE)
