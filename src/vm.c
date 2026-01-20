@@ -366,6 +366,7 @@ sol_call_ex sol_call_bc(sol_state *s, sol_fproto *proto, const sol_val *args, bo
         LABEL(SOL_OP_MUL),
         LABEL(SOL_OP_DIV),
 
+        LABEL(SOL_OP_NEG),
         LABEL(SOL_OP_EQ),
         LABEL(SOL_OP_LT),
         LABEL(SOL_OP_LE),
@@ -562,6 +563,17 @@ sol_call_ex sol_call_bc(sol_state *s, sol_fproto *proto, const sol_val *args, bo
             DISPATCH();
         }
 
+        CASE(SOL_OP_NEG) {
+            sol_val in = sol_get(s, sol_iab_b(ins));
+            switch (in.tt) {
+                case SOL_TI64: in.i64 = -in.i64; break;
+                case SOL_TF64: in.f64 = -in.f64; break;
+                case SOL_TBOOL: in.boolean = !in.boolean; break;
+                default: return sol_callerr(SOL_ERRV_TYPE_MISMATCH, "Cannot negate type '%s' in reg [%u]", sol_typename(in).c_str, sol_iabc_b(ins));
+            }
+            sol_set(s, sol_iab_a(ins), in);
+            DISPATCH();
+        }
         CASE(SOL_OP_EQ) {
             bool inv = sol_iabc_a(ins) != 0;
             sol_val lhs = sol_get(s, sol_iabc_b(ins));

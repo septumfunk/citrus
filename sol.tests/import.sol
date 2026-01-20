@@ -8,8 +8,5 @@ mod.baby = []() {
 };
 
 let x = 0;
-let b = true;
-while !b {
-    mod.baby();
-    x = x + 1;
-}
+let b = !!!(1 == 0);
+while (!b) io.println(mod.baby());

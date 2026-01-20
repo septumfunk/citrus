@@ -200,6 +200,7 @@ sol_scan_ex sol_scan(sf_str src) {
             sol_scancase(',', TK_COMMA);
             sol_scancase('.', TK_PERIOD);
             sol_scancase('+', TK_PLUS);
+            sol_scancase('-', TK_MINUS);
             sol_scancase(';', TK_SEMICOLON);
             sol_scancase('*', TK_ASTERISK);
             sol_scancase('!', sol_scanpeek(&s, '=') ? TK_NOT_EQUAL : TK_BANG);
@@ -242,17 +243,7 @@ sol_scan_ex sol_scan(sf_str src) {
             }
 
             default:
-                if (c == '-' && tks.count > 0 && (
-                    (tks.data + tks.count - 1)->tt == TK_NUMBER || (tks.data + tks.count - 1)->tt == TK_INTEGER ||
-                    (tks.data + tks.count - 1)->tt == TK_IDENTIFIER || (tks.data + tks.count - 1)->tt == TK_STRING ||
-                    (tks.data + tks.count - 1)->tt == TK_TRUE || (tks.data + tks.count - 1)->tt == TK_FALSE ||
-                    (tks.data + tks.count - 1)->tt == TK_NIL || (tks.data + tks.count - 1)->tt == TK_RIGHT_PAREN
-                )) {
-                    s.current.tt = TK_MINUS;
-                    sol_tokenvec_push(&tks, s.current);
-                    continue;
-                }
-                if (sol_isnumber(c) || (c == '-' && sol_isnumber(s.src.c_str[s.cc + 1]))) { // Number
+                if (sol_isnumber(c)) { // Number
                     s.current = sol_scannum(&s);
                     if (s.current.tt != TK_NUMBER && s.current.tt != TK_INTEGER) {
                         eval = SOL_ERRP_NUMBER_FORMAT;
@@ -298,6 +289,9 @@ void sol_node_free(sol_node *tree) {
     switch (tree->tt) {
         case SOL_ND_MEMBER:
             sol_node_free(tree->n_postfix.expr);
+            break;
+        case SOL_ND_UNARY:
+            sol_node_free(tree->n_unary.right);
             break;
         case SOL_ND_BINARY:
             sol_node_free(tree->n_binary.left);
@@ -350,7 +344,7 @@ void sol_node_free(sol_node *tree) {
             break;
         case SOL_ND_WHILE:
             sol_node_free(tree->n_while.condition);
-            sol_node_free(tree->n_while.block);
+            sol_node_free(tree->n_while.stmt);
             break;
     }
     free(tree);
@@ -373,6 +367,7 @@ size_t sol_precedence(sol_tokentype tt) {
 bool sol_niscondition(sol_node *node) {
     if (node->tt == SOL_ND_IDENTIFIER ||
         node->tt == SOL_ND_CALL ||
+        (node->tt == SOL_ND_UNARY && node->n_unary.op == TK_BANG) ||
        (node->tt == SOL_ND_LITERAL && node->n_literal.tt == SOL_TBOOL))
         return true;
     if (node->tt != SOL_ND_BINARY)
@@ -396,6 +391,7 @@ static inline bool sol_parpeek(sol_parser *p, sol_tokentype match) {
 #define sol_perr(type) sol_parse_ex_err((sol_parse_err){(type), p->tok->line, p->tok->column})
 
 sol_parse_ex sol_pprimary(sol_parser *p);
+sol_parse_ex sol_punary(sol_parser *p);
 sol_parse_ex sol_pexpr(sol_parser *p, size_t prec);
 sol_parse_ex sol_pif(sol_parser *p);
 sol_parse_ex sol_plet(sol_parser *p);
@@ -421,6 +417,9 @@ sol_parse_ex sol_pprimary(sol_parser *p) {
             ++p->tok;
             return sol_parse_ex_ok(n);
         }
+        case TK_BANG:
+        case TK_MINUS:
+            return sol_punary(p);
         case TK_LEFT_BRACKET: return sol_pfun(p);
         case TK_ASM: return sol_pasm(p);
         case TK_LEFT_BRACE: return sol_pobj(p);
@@ -446,6 +445,20 @@ sol_parse_ex sol_pprimary(sol_parser *p) {
         default:
             return sol_perr(SOL_ERRP_EXPECTED_EXPRESSION);
     }
+}
+
+sol_parse_ex sol_punary(sol_parser *p) {
+    sol_tokentype tt = (p->tok++)->tt;
+    sol_parse_ex expr = sol_pexpr(p, 0);
+    if (!expr.ok) return expr;
+
+    sol_node *n_unary = malloc(sizeof(sol_node));
+    *n_unary = (sol_node){
+        SOL_ND_UNARY,
+        (p->tok-1)->line, (p->tok-1)->column,
+        .n_unary = { tt, expr.ok }
+    };
+    return sol_parse_ex_ok(n_unary);
 }
 
 sol_parse_ex sol_pexpr(sol_parser *p, size_t prec) {
@@ -491,11 +504,7 @@ sol_parse_ex sol_pif(sol_parser *p) {
         return sol_parse_ex_err((sol_parse_err){SOL_ERRP_EXPECTED_CONDITION, line, column});
     }
 
-    if (p->tok->tt != TK_LEFT_BRACE) {
-        sol_node_free(cex.ok);
-        return sol_perr(SOL_ERRP_EXPECTED_BLOCK);
-    }
-    sol_parse_ex tex = sol_pblock(p);
+    sol_parse_ex tex = sol_pstmt(p);
     if (!tex.is_ok) {
         sol_node_free(cex.ok);
         return tex;
@@ -503,12 +512,7 @@ sol_parse_ex sol_pif(sol_parser *p) {
     sol_parse_ex eex = (sol_parse_ex){.is_ok = false};
     if (p->tok->tt == TK_ELSE) {
         ++p->tok;
-        if (p->tok->tt != TK_LEFT_BRACE) {
-            sol_node_free(cex.ok);
-            sol_node_free(tex.ok);
-            return sol_perr(SOL_ERRP_EXPECTED_BLOCK);
-        }
-        eex = sol_pblock(p);
+        eex = sol_pstmt(p);
         if (!eex.is_ok) {
             sol_node_free(cex.ok);
             sol_node_free(tex.ok);
@@ -816,21 +820,17 @@ sol_parse_ex sol_pwhile(sol_parser *p) {
     sol_parse_ex cond = sol_pexpr(p, 0);
     if (!cond.is_ok)
         return cond;
-    if (cond.ok->tt != SOL_ND_BINARY || !sol_niscondition(cond.ok)) {
+    if (!sol_niscondition(cond.ok)) {
         uint16_t line = cond.ok->line;
         uint16_t column = cond.ok->column;
         sol_node_free(cond.ok);
         return sol_parse_ex_err((sol_parse_err){SOL_ERRP_EXPECTED_CONDITION, line, column});
     }
-    if (p->tok->tt != TK_LEFT_BRACE) {
-        sol_node_free(cond.ok);
-        return sol_perr(SOL_ERRP_EXPECTED_BLOCK);
-    }
 
-    sol_parse_ex block = sol_pblock(p);
-    if (!block.is_ok) {
+    sol_parse_ex stmt = sol_pstmt(p);
+    if (!stmt.is_ok) {
         sol_node_free(cond.ok);
-        return block;
+        return stmt;
     }
 
     sol_node *n_while = malloc(sizeof(sol_node));
@@ -839,7 +839,7 @@ sol_parse_ex sol_pwhile(sol_parser *p) {
         .line = p->tok->line, .column = p->tok->column,
         .n_while = {
             .condition = cond.ok,
-            .block = block.ok,
+            .stmt = stmt.ok,
         },
     };
 

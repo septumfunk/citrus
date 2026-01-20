@@ -256,6 +256,30 @@ sol_cnode_ex sol_cnode(sol_compiler *c, sol_node *node, uint32_t t_reg) {
             return sol_cnode_ex_ok();
         }
 
+        case SOL_ND_UNARY: {
+            uint32_t right = sol_rtemp(c);
+            sol_cnode_ex right_ex = sol_cnode(c, node->n_unary.right, right);
+            if (!right_ex.is_ok) return right_ex;
+
+            switch(node->n_unary.op) {
+                case TK_MINUS:
+                    sol_cemit(c, sol_ins_ab(SOL_OP_NEG, t_reg, right));
+                    break;
+                case TK_BANG: {
+                    uint32_t t = sol_rtemp(c);
+                    sol_cemit(c, sol_ins_ab(SOL_OP_LOAD, t, 1));
+                    sol_cemit(c, sol_ins_abc(SOL_OP_EQ, 0, t, right));
+                    sol_cemit(c, sol_ins_ab(SOL_OP_LOAD, t_reg, 1));
+                    sol_cemit(c, sol_ins_ab(SOL_OP_LOAD, t_reg, 0));
+                    sol_ctemps(c, 1);
+                    break;
+                }
+                default:
+                    return sol_cerr(SOL_ERRC_UNKNOWN);
+            }
+            sol_ctemps(c, 1);
+            return sol_cnode_ex_ok();
+        }
         case SOL_ND_BINARY: {
             uint32_t left = sol_rtemp(c), right = sol_rtemp(c);
             if (node->n_binary.op != TK_EQUAL) {
@@ -435,35 +459,42 @@ sol_cnode_ex sol_cnode(sol_compiler *c, sol_node *node, uint32_t t_reg) {
 
         case SOL_ND_IF: {
             uint32_t cr = sol_rtemp(c);
-            if (node->n_if.condition->tt == SOL_ND_IDENTIFIER) {
+            uint32_t s = 0;
+            sol_node *cond = node->n_if.condition;
+            if (cond->tt == SOL_ND_UNARY) {
+                s = 1;
+                cond = cond->n_unary.right;
+            }
+
+            if (cond->tt == SOL_ND_IDENTIFIER) {
                 sol_local loc;
-                if (!sol_lexists(c, *(sf_str *)node->n_if.condition->n_identifier.dyn, &loc)) { // Global
+                if (!sol_lexists(c, *(sf_str *)cond->n_identifier.dyn, &loc)) { // Global
                     uint32_t name_i;
-                    if (!sol_kfind(c, node->n_if.condition->n_identifier, &name_i)) {
-                        sol_kadd(c, node->n_if.condition->n_identifier);
+                    if (!sol_kfind(c, cond->n_identifier, &name_i)) {
+                        sol_kadd(c, cond->n_identifier);
                         name_i = c->proto.constants.count - 1;
                     }
 
                     uint32_t id_r = sol_rtemp(c);
                     sol_cemit(c, sol_ins_abc(SOL_OP_GUPO, id_r, 0, name_i));
-                    sol_cemit(c, sol_ins_abc(SOL_OP_EQ, 0, id_r, cr));
+                    sol_cemit(c, sol_ins_abc(SOL_OP_EQ, s, id_r, cr));
                     sol_ctemps(c, 1);
                 } else { // Local
                     sol_cemit(c, sol_ins_ab(SOL_OP_LOAD, cr, 1));
                     if (loc.upval) { // Reserve temp for upval
                         uint32_t up = sol_rtemp(c);
                         sol_cemit(c, sol_ins_ab(SOL_OP_GETU, up, loc.reg));
-                        sol_cemit(c, sol_ins_abc(SOL_OP_EQ, 0, up, cr));
+                        sol_cemit(c, sol_ins_abc(SOL_OP_EQ, s, up, cr));
                         sol_ctemps(c, 1);
                     } else
-                        sol_cemit(c, sol_ins_abc(SOL_OP_EQ, 0, loc.reg, cr));
+                        sol_cemit(c, sol_ins_abc(SOL_OP_EQ, s, loc.reg, cr));
                 }
             } else {
-                sol_cnode_ex ex = sol_cnode(c, node->n_if.condition, cr);
-                if (node->n_if.condition->tt == SOL_ND_CALL) {
+                sol_cnode_ex ex = sol_cnode(c, cond, cr);
+                if (cond->tt == SOL_ND_CALL) {
                     uint32_t ttemp = sol_rtemp(c);
                     sol_cemit(c, sol_ins_ab(SOL_OP_LOAD, ttemp, 1));
-                    sol_cemit(c, sol_ins_abc(SOL_OP_EQ, 0, cr, ttemp));
+                    sol_cemit(c, sol_ins_abc(SOL_OP_EQ, s, cr, ttemp));
                     sol_ctemps(c, 1);
                 }
                 if (!ex.is_ok) return ex;
@@ -493,35 +524,42 @@ sol_cnode_ex sol_cnode(sol_compiler *c, sol_node *node, uint32_t t_reg) {
         case SOL_ND_WHILE: {
             uint32_t jmp_cond = c->proto.code_c - 1;
             uint32_t cr = sol_rtemp(c);
-            if (node->n_while.condition->tt == SOL_ND_IDENTIFIER) {
+            uint32_t s = 0;
+            sol_node *cond = node->n_while.condition;
+            if (cond->tt == SOL_ND_UNARY) {
+                s = 1;
+                cond = cond->n_unary.right;
+            }
+
+            if (cond->tt == SOL_ND_IDENTIFIER) {
                 sol_local loc;
-                if (!sol_lexists(c, *(sf_str *)node->n_while.condition->n_identifier.dyn, &loc)) { // Global
+                if (!sol_lexists(c, *(sf_str *)cond->n_identifier.dyn, &loc)) { // Global
                     uint32_t name_i;
-                    if (!sol_kfind(c, node->n_while.condition->n_identifier, &name_i)) {
-                        sol_kadd(c, node->n_while.condition->n_identifier);
+                    if (!sol_kfind(c, cond->n_identifier, &name_i)) {
+                        sol_kadd(c, cond->n_identifier);
                         name_i = c->proto.constants.count - 1;
                     }
 
                     uint32_t id_r = sol_rtemp(c);
                     sol_cemit(c, sol_ins_abc(SOL_OP_GUPO, id_r, 0, name_i));
-                    sol_cemit(c, sol_ins_abc(SOL_OP_EQ, 0, id_r, cr));
+                    sol_cemit(c, sol_ins_abc(SOL_OP_EQ, s, id_r, cr));
                     sol_ctemps(c, 1);
                 } else { // Local
                     sol_cemit(c, sol_ins_ab(SOL_OP_LOAD, cr, 1));
                     if (loc.upval) { // Reserve temp for upval
                         uint32_t up = sol_rtemp(c);
                         sol_cemit(c, sol_ins_ab(SOL_OP_GETU, up, loc.reg));
-                        sol_cemit(c, sol_ins_abc(SOL_OP_EQ, 0, up, cr));
+                        sol_cemit(c, sol_ins_abc(SOL_OP_EQ, s, up, cr));
                         sol_ctemps(c, 1);
                     } else
-                        sol_cemit(c, sol_ins_abc(SOL_OP_EQ, 0, loc.reg, cr));
+                        sol_cemit(c, sol_ins_abc(SOL_OP_EQ, s, loc.reg, cr));
                 }
             } else {
-                sol_cnode_ex ex = sol_cnode(c, node->n_while.condition, cr);
-                if (node->n_while.condition->tt == SOL_ND_CALL) {
+                sol_cnode_ex ex = sol_cnode(c, cond, cr);
+                if (cond->tt == SOL_ND_CALL) {
                     uint32_t ttemp = sol_rtemp(c);
                     sol_cemit(c, sol_ins_ab(SOL_OP_LOAD, ttemp, 1));
-                    sol_cemit(c, sol_ins_abc(SOL_OP_EQ, 0, cr, ttemp));
+                    sol_cemit(c, sol_ins_abc(SOL_OP_EQ, s, cr, ttemp));
                     sol_ctemps(c, 1);
                 }
                 if (!ex.is_ok) return ex;
@@ -531,7 +569,7 @@ sol_cnode_ex sol_cnode(sol_compiler *c, sol_node *node, uint32_t t_reg) {
             sol_cemit(c, sol_ins_a(SOL_OP_JMP, 0));
 
             // Do
-            sol_cnode_ex ex = sol_cnode(c, node->n_while.block, UINT32_MAX);
+            sol_cnode_ex ex = sol_cnode(c, node->n_while.stmt, UINT32_MAX);
             if (!ex.is_ok) return ex;
             c->proto.code[jmp_break] = sol_ins_a(SOL_OP_JMP, c->proto.code_c - jmp_break);
             sol_cemit(c, sol_ins_a(SOL_OP_JMP, jmp_cond - c->proto.code_c));

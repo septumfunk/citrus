@@ -36,6 +36,7 @@ typedef enum {
     SOL_OP_MUL,
     SOL_OP_DIV,
 
+    SOL_OP_NEG,
     SOL_OP_EQ,
     SOL_OP_LT,
     SOL_OP_LE,

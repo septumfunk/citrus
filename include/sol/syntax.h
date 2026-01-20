@@ -74,6 +74,7 @@ typedef enum {
     SOL_ND_LET,
     SOL_ND_ASSIGN,
 
+    SOL_ND_UNARY,
     SOL_ND_BINARY,
     SOL_ND_CALL,
     SOL_ND_FUN,
@@ -98,6 +99,10 @@ typedef struct sol_node {
             struct sol_node *expr;
             sol_val postfix;
         } n_postfix;
+        struct { // <op> r
+            sol_tokentype op;
+            struct sol_node *right;
+        } n_unary;
         struct { // l <op> r
             sol_tokentype op;
             struct sol_node *left;
@@ -123,7 +128,7 @@ typedef struct sol_node {
         } n_call;
         struct { // while c {b}
             struct sol_node *condition;
-            struct sol_node *block;
+            struct sol_node *stmt;
         } n_while;
         struct sol_block { // {s}
             struct sol_node **stmts;

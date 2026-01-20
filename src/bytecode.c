@@ -140,6 +140,11 @@ const sol_inssig SOL_OP_INFO[SOL_OP_COUNT] = {
         .type = SOL_INS_ABC,
     },
 
+    [SOL_OP_NEG] = {
+        .opcode = SOL_OP_NEG,
+        .mnemonic = "NEG",
+        .type = SOL_INS_AB,
+    },
     [SOL_OP_EQ] = {
         .opcode = SOL_OP_EQ,
         .mnemonic = "EQ",
