@@ -202,7 +202,7 @@ sol_call_ex sol_std_catch(sol_state *s) {
         sol_popframe(s); // Frame remains after panic!
         return sol_call_ex_ok(sol_dnerr(s, sf_str_dup(try_ex.err.panic)));
     }
-    return sol_call_ex_ok(SOL_NIL);
+    return sol_call_ex_ok(try_ex.ok);
 }
 sol_call_ex sol_std_unwrap(sol_state *s) {
     sol_val err = sol_get(s, 0);
