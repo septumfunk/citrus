@@ -10,8 +10,10 @@ typedef enum {
     TK_LEFT_BRACKET, TK_RIGHT_BRACKET,
     TK_COMMA, TK_PERIOD, TK_MINUS, TK_PLUS, TK_SEMICOLON, TK_SLASH, TK_ASTERISK,
 
-    TK_BANG, TK_NOT_EQUAL,
-    TK_EQUAL, TK_DOUBLE_EQUAL,
+    TK_BANG,
+    TK_EQUAL, TK_NOT_EQUAL,
+    TK_PLUS_EQUAL, TK_MINUS_EQUAL,
+    TK_DOUBLE_EQUAL,
     TK_GREATER, TK_GREATER_EQUAL,
     TK_LESS, TK_LESS_EQUAL,
 
@@ -74,6 +76,7 @@ typedef enum {
     SOL_ND_LET,
     SOL_ND_ASSIGN,
 
+    SOL_ND_UNARY,
     SOL_ND_BINARY,
     SOL_ND_CALL,
     SOL_ND_FUN,
@@ -84,6 +87,8 @@ typedef enum {
     SOL_ND_IF,
     SOL_ND_WHILE,
     SOL_ND_RETURN,
+
+    SOL_ND_OBJ,
 } sol_nodetype;
 
 /// A node in the AST (Abstract Syntax Tree) that the parser exports.
@@ -98,6 +103,10 @@ typedef struct sol_node {
             struct sol_node *expr;
             sol_val postfix;
         } n_postfix;
+        struct { // <op> r
+            sol_tokentype op;
+            struct sol_node *right;
+        } n_unary;
         struct { // l <op> r
             sol_tokentype op;
             struct sol_node *left;
@@ -123,7 +132,7 @@ typedef struct sol_node {
         } n_call;
         struct { // while c {b}
             struct sol_node *condition;
-            struct sol_node *block;
+            struct sol_node *stmt;
         } n_while;
         struct sol_block { // {s}
             struct sol_node **stmts;
@@ -149,6 +158,7 @@ typedef struct sol_node {
 
         struct { // { n_member, }
             struct sol_node **members;
+            uint32_t mem_c;
         } n_obj;
     };
 } sol_node;

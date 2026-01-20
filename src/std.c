@@ -66,7 +66,7 @@ sol_call_ex sol_std_eval(sol_state *s) {
     sol_compile_ex cm_ex = sol_csrc(s, *(sf_str *)src.dyn);
     if (!cm_ex.is_ok)
         return sol_call_ex_ok(sol_dnerr(s, sf_str_dup(sol_err_string(cm_ex.err.tt))));
-    sol_call_ex cl_ex = sol_call(s, &cm_ex.ok, NULL);
+    sol_call_ex cl_ex = sol_call(s, &cm_ex.ok, NULL, 0);
     sol_fproto_free(&cm_ex.ok);
     if (!cl_ex.is_ok)
             return sol_call_ex_ok(sol_dnerr(s, sf_str_dup(cl_ex.err.tt == SOL_ERRV_PANIC ?
@@ -99,7 +99,7 @@ sol_call_ex sol_std_import(sol_state *s) {
     sol_compile_ex cm_ex = sol_cfile(s, p);
     if (!cm_ex.is_ok)
         return sol_call_ex_ok(sol_dnerr(s, sf_str_dup(sol_err_string(cm_ex.err.tt))));
-    sol_call_ex cl_ex = sol_call(s, &cm_ex.ok, NULL);
+    sol_call_ex cl_ex = sol_call(s, &cm_ex.ok, NULL, 0);
     sol_fproto_free(&cm_ex.ok);
     if (!cl_ex.is_ok)
             return sol_call_ex_ok(sol_dnerr(s, sf_str_dup(cl_ex.err.tt == SOL_ERRV_PANIC ?
@@ -166,9 +166,57 @@ sol_call_ex sol_std_err(sol_state *s) {
 }
 sol_call_ex sol_std_panic(sol_state *s) {
     sol_val err = sol_get(s, 0);
+    if (!sol_isdtype(err, SOL_DSTR))
+        return sol_call_ex_err((sol_call_err){SOL_ERRV_TYPE_MISMATCH,
+            sf_str_fmt("Arg 'err' expected str, found '%s'", sol_typename(err).c_str),
+        0});
+    return sol_call_ex_err((sol_call_err){SOL_ERRV_PANIC, sf_str_dup(*(sf_str *)err.dyn), 0});
+}
+sol_call_ex sol_std_attempt(sol_state *s) {
+    sol_val try = sol_get(s, 0);
+    if (!sol_isdtype(try, SOL_DFUN))
+        return sol_call_ex_err((sol_call_err){SOL_ERRV_TYPE_MISMATCH,
+            sf_str_fmt("Arg 'try' expected fun, found '%s'", sol_typename(try).c_str),
+        0});
+    sol_val handler = sol_get(s, 1);
+    if (!sol_isdtype(handler, SOL_DFUN))
+        return sol_call_ex_err((sol_call_err){SOL_ERRV_TYPE_MISMATCH,
+            sf_str_fmt("Arg 'handler' expected fun, found '%s'", sol_typename(handler).c_str),
+        0});
+    sol_call_ex try_ex = sol_call(s, try.dyn, NULL, 0);
+    if (!try_ex.is_ok) {
+        sol_popframe(s); // Frame remains after panic!
+        sol_val err = sol_dnerr(s, sf_str_dup(try_ex.err.panic));
+        sol_call_ex hand_ex = sol_call(s, handler.dyn, (sol_val[]){err}, 1);
+        if (!hand_ex.is_ok) return hand_ex;
+        return sol_call_ex_ok(hand_ex.ok);
+    }
+    return sol_call_ex_ok(try_ex.ok);
+}
+sol_call_ex sol_std_catch(sol_state *s) {
+    sol_val try = sol_get(s, 0);
+    if (!sol_isdtype(try, SOL_DFUN))
+        return sol_call_ex_err((sol_call_err){SOL_ERRV_TYPE_MISMATCH,
+            sf_str_fmt("Arg 'try' expected fun, found '%s'", sol_typename(try).c_str),
+        0});
+    sol_call_ex try_ex = sol_call(s, try.dyn, NULL, 0);
+    if (!try_ex.is_ok) {
+        sol_popframe(s); // Frame remains after panic!
+        return sol_call_ex_ok(sol_dnerr(s, sf_str_dup(try_ex.err.panic)));
+    }
+    return sol_call_ex_ok(SOL_NIL);
+}
+sol_call_ex sol_std_unwrap(sol_state *s) {
+    sol_val err = sol_get(s, 0);
     if (!sol_isdtype(err, SOL_DERR))
         return sol_call_ex_ok(err);
     return sol_call_ex_err((sol_call_err){SOL_ERRV_PANIC, sf_str_dup(*(sf_str *)err.dyn), 0});
+}
+sol_call_ex sol_std_unwrap_or(sol_state *s) {
+    sol_val err = sol_get(s, 0);
+    if (!sol_isdtype(err, SOL_DERR))
+        return sol_call_ex_ok(err);
+    return sol_call_ex_ok(sol_get(s, 1));
 }
 sol_call_ex sol_std_assert(sol_state *s) {
     sol_val con = sol_get(s, 0);
@@ -298,6 +346,10 @@ sol_call_ex sol_std_fwrite(sol_state *s) {
 }
 
 void sol_usestd(sol_state *state) {
+    sol_val sol = sol_dnew(state, SOL_DOBJ);
+    sol_dobj_set(sol.dyn, sf_lit("version"), sol_dnstr(state, sf_str_cdup(SOL_VERSION)));
+    sol_dobj_set(sol.dyn, sf_lit("git"), sol_dnstr(state, sf_str_cdup(SOL_GIT)));
+
     sol_val io = sol_dnew(state, SOL_DOBJ);
     sol_dobj_set(io.dyn, sf_lit("print"), sol_wrapcfun(state, sol_std_print, 1, 0));
     sol_dobj_set(io.dyn, sf_lit("println"), sol_wrapcfun(state, sol_std_println, 1, 0));
@@ -319,12 +371,17 @@ void sol_usestd(sol_state *state) {
     sol_dobj_set(_g, sf_lit("string"), sol_wrapcfun(state, sol_std_string, 1, 0));
     sol_dobj_set(_g, sf_lit("err"), sol_wrapcfun(state, sol_std_err, 1, 0));
     sol_dobj_set(_g, sf_lit("panic"), sol_wrapcfun(state, sol_std_panic, 1, 0));
+    sol_dobj_set(_g, sf_lit("attempt"), sol_wrapcfun(state, sol_std_attempt, 2, 0));
+    sol_dobj_set(_g, sf_lit("catch"), sol_wrapcfun(state, sol_std_catch, 1, 0));
+    sol_dobj_set(_g, sf_lit("unwrap"), sol_wrapcfun(state, sol_std_unwrap, 1, 0));
+    sol_dobj_set(_g, sf_lit("unwrap_or"), sol_wrapcfun(state, sol_std_unwrap_or, 2, 0));
     sol_dobj_set(_g, sf_lit("assert"), sol_wrapcfun(state, sol_std_assert, 1, 0));
     sol_dobj_set(_g, sf_lit("type"), sol_wrapcfun(state, sol_std_type, 1, 0));
     sol_dobj_set(_g, sf_lit("eval"), sol_wrapcfun(state, sol_std_eval, 1, 0));
     sol_dobj_set(_g, sf_lit("import"), sol_wrapcfun(state, sol_std_import, 1, 0));
     sol_dobj_set(_g, sf_lit("collect"), sol_wrapcfun(state, sol_std_collect, 0, 0));
 
+    sol_dobj_set(_g, sf_lit("sol"), sol);
     sol_dobj_set(_g, sf_lit("io"), io);
     sol_dobj_set(_g, sf_lit("obj"), obj);
     sol_dobj_set(_g, sf_lit("math"), math);

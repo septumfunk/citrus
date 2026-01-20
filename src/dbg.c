@@ -132,7 +132,7 @@ static int sol_rdcmd(void) {
             memset(dbg.bp, 1, dbg.proto.line_c * sizeof(bool));
         }
 
-        sol_call_ex e = sol_dcall(dbg.s, &dbg.proto, NULL, dbg.bp);
+        sol_call_ex e = sol_dcall(dbg.s, &dbg.proto, NULL, 0, dbg.bp);
         if (e.is_ok) {
             sf_str ret = sol_tostring(e.ok);
             sf_str p = sf_str_fmt(sol_isdtype(e.ok, SOL_DSTR) ?
@@ -192,7 +192,7 @@ static int sol_rdcmd(void) {
             sf_str_free(e);
             return 0;
         }
-        sol_call_ex call_ex = sol_call(dbg.s, &comp_ex.ok, NULL);
+        sol_call_ex call_ex = sol_call(dbg.s, &comp_ex.ok, NULL, 0);
         if (!call_ex.is_ok) {
             sf_str e = sf_str_fmt(call_ex.err.tt == SOL_ERRV_PANIC ? "panic: %s\n" : "error: %s\n",
                 (call_ex.err.tt == SOL_ERRV_PANIC ? call_ex.err.panic : sol_err_string(call_ex.err.tt)).c_str
