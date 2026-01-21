@@ -199,6 +199,7 @@ sol_scan_ex sol_scan(sf_str src) {
             sol_scancase(']', TK_RIGHT_BRACKET);
             sol_scancase(',', TK_COMMA);
             sol_scancase('.', TK_PERIOD);
+            sol_scancase(':', TK_COLON);
             sol_scancase(';', TK_SEMICOLON);
             sol_scancase('*', TK_ASTERISK);
             sol_scancase('+', sol_scanpeek(&s, '=') ? TK_PLUS_EQUAL : TK_PLUS);
@@ -281,7 +282,7 @@ sol_scan_ex sol_scan(sf_str src) {
 
 typedef struct {
     sol_token *tok;
-    bool asm;
+    bool asm, impli;
 } sol_parser;
 
 void sol_node_free(sol_node *tree) {
@@ -298,7 +299,7 @@ void sol_node_free(sol_node *tree) {
             sol_node_free(tree->n_binary.right);
             break;
         case SOL_ND_RETURN:
-            sol_node_free(tree->n_return);
+            sol_node_free(tree->n_return.expr);
             break;
         case SOL_ND_IDENTIFIER:
         case SOL_ND_LITERAL:
@@ -422,6 +423,7 @@ sol_parse_ex sol_pprimary(sol_parser *p) {
             ++p->tok;
             return sol_parse_ex_ok(n);
         }
+        case TK_IF: return sol_pif(p);
         case TK_BANG:
         case TK_MINUS:
             return sol_punary(p);
@@ -508,6 +510,13 @@ sol_parse_ex sol_pif(sol_parser *p) {
         sol_node_free(cex.ok);
         return sol_parse_ex_err((sol_parse_err){SOL_ERRP_EXPECTED_CONDITION, line, column});
     }
+    if (p->tok->tt != TK_COLON) {
+        uint16_t line = cex.ok->line;
+        uint16_t column = cex.ok->column;
+        sol_node_free(cex.ok);
+        return sol_parse_ex_err((sol_parse_err){SOL_ERRP_EXPECTED_COLON, line, column});
+    }
+    ++p->tok;
 
     sol_parse_ex tex = sol_pstmt(p);
     if (!tex.is_ok) {
@@ -517,6 +526,15 @@ sol_parse_ex sol_pif(sol_parser *p) {
     sol_parse_ex eex = (sol_parse_ex){.is_ok = false};
     if (p->tok->tt == TK_ELSE) {
         ++p->tok;
+        if (p->tok->tt != TK_COLON) {
+            uint16_t line = cex.ok->line;
+            uint16_t column = cex.ok->column;
+            sol_node_free(cex.ok);
+            return sol_parse_ex_err((sol_parse_err){SOL_ERRP_EXPECTED_COLON, line, column});
+        }
+        ++p->tok;
+        if (tex.ok->tt == SOL_ND_RETURN && tex.ok->n_return.implicit)
+            p->impli = true;
         eex = sol_pstmt(p);
         if (!eex.is_ok) {
             sol_node_free(cex.ok);
@@ -653,6 +671,10 @@ sol_parse_ex sol_pblock(sol_parser *p) {
         if (!sex.is_ok) {
             sol_node_free(n_block);
             return sex;
+        }
+        if (sex.ok->tt == SOL_ND_RETURN && p->tok->tt != TK_RIGHT_BRACE && p->tok->tt != TK_EOF) {
+            sol_node_free(n_block);
+            return sol_perr(sex.ok->n_return.implicit ? SOL_ERRP_UNEXPECTED_IMPL_RETURN : SOL_ERRP_UNREACHABLE_CODE);
         }
         n_block->n_block.stmts = realloc(n_block->n_block.stmts, ++n_block->n_block.count * sizeof(sol_node *));
         n_block->n_block.stmts[n_block->n_block.count - 1] = sex.ok;
@@ -861,6 +883,13 @@ sol_parse_ex sol_pwhile(sol_parser *p) {
         sol_node_free(cond.ok);
         return sol_parse_ex_err((sol_parse_err){SOL_ERRP_EXPECTED_CONDITION, line, column});
     }
+    if (p->tok->tt != TK_COLON) {
+        uint16_t line = cond.ok->line;
+        uint16_t column = cond.ok->column;
+        sol_node_free(cond.ok);
+        return sol_parse_ex_err((sol_parse_err){SOL_ERRP_EXPECTED_COLON, line, column});
+    }
+    ++p->tok;
 
     sol_parse_ex stmt = sol_pstmt(p);
     if (!stmt.is_ok) {
@@ -897,7 +926,7 @@ sol_parse_ex sol_preturn(sol_parser *p) {
     *n_return = (sol_node){
         .tt = SOL_ND_RETURN,
         .line = line, .column = column,
-        .n_return = expr.ok,
+        .n_return = { expr.ok, false },
     };
     return sol_parse_ex_ok(n_return);
 }
@@ -915,23 +944,30 @@ sol_parse_ex sol_pstmt(sol_parser *p) {
         case TK_WHILE: return sol_pwhile(p);
         case TK_LEFT_BRACE: case TK_SOF: return sol_pblock(p);
         case TK_RETURN: return sol_preturn(p);
-        case TK_IDENTIFIER: {
+        default: {
             sol_parse_ex id = sol_pexpr(p, 0);
-            if (!id.is_ok) return id;
+            if (p->impli || !id.is_ok) {
+                p->impli = false;
+                return id;
+            }
             if (p->tok->tt != TK_SEMICOLON) {
-                --p->tok;
-                return sol_perr(SOL_ERRP_EXPECTED_SEMICOLON);
+                sol_node *n_return = malloc(sizeof(sol_node));
+                *n_return = (sol_node){
+                    .tt = SOL_ND_RETURN,
+                    .line = id.ok->line, .column = id.ok->column,
+                    .n_return = { id.ok, true },
+                };
+                return sol_parse_ex_ok(n_return);
             }
             ++p->tok;
             return id;
         }
-        default: return sol_perr(SOL_ERRP_EXPECTED_STMT);
     };
 }
 
 sol_parse_ex sol_parse(sol_tokenvec *tokens) {
     if (tokens->count == 0)
         return sol_parse_ex_err((sol_parse_err){SOL_ERRP_NO_TOKENS, 0, 0});
-    sol_parser p = { tokens->data, false };
+    sol_parser p = { tokens->data, false, false };
     return sol_pstmt(&p);
 }

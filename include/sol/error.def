@@ -16,6 +16,7 @@ X(P, EXPECTED_LPAREN, "Expected '('") \
 X(P, EXPECTED_RPAREN, "Expected ')'") \
 X(P, EXPECTED_RBRACE, "Expected ']'") \
 X(P, EXPECTED_EQUAL, "Expected '='") \
+X(P, EXPECTED_COLON, "Expected ':'") \
 X(P, EXPECTED_SEMICOLON, "Expected ';'") \
 X(P, EXPECTED_CONDITION, "Expected condition") \
 X(P, EXPECTED_BLOCK, "Expected block") \
@@ -24,6 +25,8 @@ X(P, EXPECTED_ARGS, "Expected argument list") \
 X(P, EXPECTED_ASM, "Expected assembly") \
 X(P, EXPECTED_INTEGER, "Expected i64") \
 X(P, UNEXPECTED_ASM, "Unexpected assembly") \
+X(P, UNREACHABLE_CODE, "Early return causes unreachable code") \
+X(P, UNEXPECTED_IMPL_RETURN, "Unexpected implicit return causes unreachable code. Missing ';'?") \
 X(P, UNTERMINATED_ARGS, "Unterminated argument list") \
 X(P, UNTERMINATED_CAPTURES, "Unterminated capture list") \
 \

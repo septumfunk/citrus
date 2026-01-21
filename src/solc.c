@@ -511,7 +511,7 @@ sol_cnode_ex sol_cnode(sol_compiler *c, sol_node *node, uint32_t t_reg) {
                 }
             } else {
                 sol_cnode_ex ex = sol_cnode(c, cond, cr);
-                if (cond->tt == SOL_ND_CALL) {
+                if (cond->tt == SOL_ND_CALL || cond->tt == SOL_ND_LITERAL) {
                     uint32_t ttemp = sol_rtemp(c);
                     sol_cemit(c, sol_ins_ab(SOL_OP_LOAD, ttemp, 1));
                     sol_cemit(c, sol_ins_abc(SOL_OP_EQ, s, cr, ttemp));
@@ -524,14 +524,14 @@ sol_cnode_ex sol_cnode(sol_compiler *c, sol_node *node, uint32_t t_reg) {
             sol_cemit(c, sol_ins_a(SOL_OP_JMP, 0));
 
             // Then
-            sol_cnode_ex ex = sol_cnode(c, node->n_if.then_node, UINT32_MAX);
+            sol_cnode_ex ex = sol_cnode(c, node->n_if.then_node, t_reg);
             if (!ex.is_ok) return ex;
             uint32_t ofs = c->proto.code_c - (jmp_false + 1);
 
             if (node->n_if.else_node) {
                 uint32_t jmp_end = c->proto.code_c;
                 sol_cemit(c, sol_ins_a(SOL_OP_JMP, 0));
-                ex = sol_cnode(c, node->n_if.else_node, UINT32_MAX);
+                ex = sol_cnode(c, node->n_if.else_node, t_reg);
                 if (!ex.is_ok) return ex;
                 // Patch jump
                 c->proto.code[jmp_false] = sol_ins_a(SOL_OP_JMP, ofs + 1);
@@ -576,7 +576,7 @@ sol_cnode_ex sol_cnode(sol_compiler *c, sol_node *node, uint32_t t_reg) {
                 }
             } else {
                 sol_cnode_ex ex = sol_cnode(c, cond, cr);
-                if (cond->tt == SOL_ND_CALL) {
+                if (cond->tt == SOL_ND_CALL || cond->tt == SOL_ND_LITERAL) {
                     uint32_t ttemp = sol_rtemp(c);
                     sol_cemit(c, sol_ins_ab(SOL_OP_LOAD, ttemp, 1));
                     sol_cemit(c, sol_ins_abc(SOL_OP_EQ, s, cr, ttemp));
@@ -598,8 +598,12 @@ sol_cnode_ex sol_cnode(sol_compiler *c, sol_node *node, uint32_t t_reg) {
             return sol_cnode_ex_ok();
         }
         case SOL_ND_RETURN: {
+            if (node->n_return.implicit && t_reg != UINT_MAX) {
+                sol_cnode_ex ex = sol_cnode(c, node->n_return.expr, t_reg);
+                return ex;
+            }
             uint32_t r = sol_rtemp(c);
-            sol_cnode_ex ex = sol_cnode(c, node->n_return, r);
+            sol_cnode_ex ex = sol_cnode(c, node->n_return.expr, r);
             if (!ex.is_ok) return ex;
             sol_cemit(c, sol_ins_a(SOL_OP_RET, r));
             return sol_cnode_ex_ok();

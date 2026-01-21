@@ -21,7 +21,7 @@ typedef enum {
 
     TK_IDENTIFIER, TK_STRING, TK_NUMBER, TK_INTEGER,
 
-    TK_AND, TK_ELSE, TK_TRUE, TK_FALSE, TK_FUN, TK_FOR, TK_IF, TK_NIL, TK_OR,
+    TK_AND, TK_COLON, TK_ELSE, TK_TRUE, TK_FALSE, TK_FUN, TK_FOR, TK_IF, TK_NIL, TK_OR,
     TK_RETURN, TK_LET, TK_WHILE,
 
     TK_EOF
@@ -99,7 +99,10 @@ typedef struct sol_node {
     uint16_t line, column;
     union {
         sol_val n_literal, n_identifier;
-        struct sol_node *n_return;
+        struct {
+            struct sol_node *expr;
+            bool implicit;
+        } n_return;
         struct { // e.p
             struct sol_node *expr;
             sol_val postfix;
