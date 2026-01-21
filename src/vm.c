@@ -159,7 +159,7 @@ sol_val sol_dnew(sol_state *s, sol_dtype tt) {
     return (sol_val){ .tt = SOL_TDYN, .dyn = p };
 }
 
-sol_val sol_dscopy(sol_state *state, sol_val val) {
+sol_val sol_dscopy(sol_state *state, sol_val val, bool kconst) {
     if (val.tt != SOL_TDYN)
         return val; // This function only needs to copy dynamic constants
 
@@ -188,17 +188,20 @@ sol_val sol_dscopy(sol_state *state, sol_val val) {
             nfp->upvals = malloc(sizeof(sol_upvalue) * nfp->up_c);
             for (uint32_t i = 0; i < nfp->up_c; ++i) {
                 sol_upvalue upv = fp->upvals[i];
-                nfp->upvals[i] = (sol_upvalue){
+                if (kconst) {
+                    upv.name = sf_str_dup(upv.name);
+                    nfp->upvals[i] = upv;
+                } else nfp->upvals[i] = (sol_upvalue){
                     sf_str_dup(upv.name),
                     SOL_UP_VAL,
-                    .value = upv.tt == SOL_UP_REF ? sol_get(state, upv.ref) : upv.value,
+                    .value = upv.tt == SOL_UP_REF ? sol_rawget(state, upv.ref, upv.frame) : upv.value,
                 };
             }
 
             memcpy(nfp->code, fp->code, sizeof(sol_instruction) * fp->code_c);
             memcpy(nfp->dbg, fp->dbg, sizeof(sol_dbg) * fp->code_c);
             for (sol_val *v = fp->constants.data; v < fp->constants.data + fp->constants.count; ++v)
-                sol_valvec_push(&nfp->constants, sol_dscopy(state, *v));
+                sol_valvec_push(&nfp->constants, sol_dscopy(state, *v, true));
             break;
         }
         default: return SOL_NIL;
@@ -208,7 +211,7 @@ sol_val sol_dscopy(sol_state *state, sol_val val) {
 
 sol_val sol_dcopy(sol_state *state, sol_val val) {
     if (val.tt == SOL_TDYN) {
-        val = sol_dscopy(state, val);
+        val = sol_dscopy(state, val, false);
         sol_dpush(state, sol_dheader(val));
     }
     return val;
@@ -437,7 +440,6 @@ sol_call_ex sol_call_bc(sol_state *s, sol_fproto *proto, const sol_val *args, ui
         CASE(SOL_OP_RET) {
             return_val = sol_get(s, (uint32_t)sol_ia_a(ins));
             goto ret;
-            DISPATCH();
         }
         CASE(SOL_OP_JMP) {
             pc = (uint32_t)((int32_t)pc + sol_ia_a(ins));
@@ -448,16 +450,16 @@ sol_call_ex sol_call_bc(sol_state *s, sol_fproto *proto, const sol_val *args, ui
             if (!sol_isdtype(fun, SOL_DFUN))
                 return sol_callerr(SOL_ERRV_TYPE_MISMATCH, "Expected fun at r[%d], found %s.", sol_iabc_b(ins), sol_typename(fun).c_str);
 
-            sol_fproto f = *(sol_fproto *)fun.dyn;
+            sol_fproto *f = fun.dyn;
             sol_call_ex fex;
-            if (f.arg_c > 0) {
-                sol_val *argv = calloc(f.arg_c, sizeof(sol_val));
+            if (f->arg_c > 0) {
+                sol_val *argv = calloc(f->arg_c, sizeof(sol_val));
                 uint32_t argc = 0;
-                for (; argc < f.arg_c && argc < s->frames.data[s->frames.count - 1].size; ++argc)
+                for (; argc < f->arg_c && argc < s->frames.data[s->frames.count - 1].size; ++argc)
                     argv[argc] = sol_get(s, sol_iabc_c(ins) + argc);
-                fex = sol_call(s, &f, argv, argc);
+                fex = sol_call(s, f, argv, argc);
                 free(argv);
-            } else fex = sol_call(s, &f, NULL, 0);
+            } else fex = sol_call(s, f, NULL, 0);
             if (!fex.is_ok) {
                 fex.err.pc = pc - 1;
                 return fex;

@@ -18,8 +18,11 @@ X(P, EXPECTED_RBRACE, "Expected ']'") \
 X(P, EXPECTED_EQUAL, "Expected '='") \
 X(P, EXPECTED_COLON, "Expected ':'") \
 X(P, EXPECTED_SEMICOLON, "Expected ';'") \
+X(P, UNEXPECTED_SEMICOLON, "Unexpected ';'") \
+X(P, UNEXPECTED_SEMICOLON_OBJ, "Unexpected ';', did you mean (optionally) ','?") \
 X(P, EXPECTED_CONDITION, "Expected condition") \
 X(P, EXPECTED_BLOCK, "Expected block") \
+X(P, EXPECTED_ELSE, "Expected else or ';'") \
 X(P, EXPECTED_STMT, "Expected statement") \
 X(P, EXPECTED_ARGS, "Expected argument list") \
 X(P, EXPECTED_ASM, "Expected assembly") \

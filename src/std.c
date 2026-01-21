@@ -5,6 +5,7 @@
 #include <sf/fs.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -106,6 +107,15 @@ sol_call_ex sol_std_import(sol_state *s) {
             ));
     return cl_ex;
 }
+sol_call_ex sol_std_require(sol_state *s) {
+    sol_call_ex import = sol_std_import(s);
+    if (!import.is_ok) return import;
+    if (sol_isdtype(import.ok, SOL_DERR))
+        return sol_call_ex_err((sol_call_err){
+            SOL_ERRV_PANIC, sf_str_dup(*(sf_str *)import.ok.dyn), 0
+        });
+    return import;
+}
 sol_call_ex sol_std_collect(sol_state *s) {
     sol_dcollect(s);
     return sol_call_ex_ok(SOL_NIL);
@@ -154,6 +164,64 @@ sol_call_ex sol_std_get(sol_state *s) {
     }
 
     return sol_call_ex_ok(ex.ok);
+}
+
+typedef struct {
+    sf_str *out;
+    bool pretty, commas;
+    uint32_t id;
+} _sol_stringify_args;
+void _sol_stringify_fe(void *u, sf_str key, sol_val val);
+sf_str _sol_stringify(sol_dobj *obj, bool pretty, bool commas, uint32_t id) {
+    if (obj->pair_count == 0) return sf_lit("{}");
+    sf_str out = sf_str_cdup(pretty ? "{\n" : "{ ");
+    sol_dobj_foreach(obj, _sol_stringify_fe, &(_sol_stringify_args){&out, pretty, commas, id});
+    sf_str_append(&out, sf_lit("}"));
+    return out;
+}
+void _sol_stringify_fe(void *u, sf_str key, sol_val val) {
+    _sol_stringify_args *args = u;
+    if (args->pretty && args->id) {
+        size_t s = sizeof(char) * args->id * 2;
+        char *id = malloc(s + 1);
+        memset(id, ' ', sizeof(char) * args->id * 2);
+        sf_str_append(args->out, sf_ref(id));
+        free(id);
+    }
+    sf_str_append(args->out, key);
+    sf_str_append(args->out, sf_lit(" = "));
+    switch (val.tt) {
+        case SOL_TDYN: if (sol_isdtype(val, SOL_DOBJ)) {
+            sf_str_append(args->out, _sol_stringify(val.dyn, args->pretty, args->commas, args->id + 1));
+            break;
+        }
+        default: sf_str_append(args->out, sol_tostring(val)); break;
+    }
+    sf_str ec = sf_lit(" ");
+    if (args->pretty && args->commas)
+        ec = sf_lit(",\n");
+    else if (args->commas)
+        ec = sf_lit(",");
+    else if (args->pretty)
+        ec = sf_lit("\n");
+    sf_str_append(args->out, ec);
+}
+sol_call_ex sol_std_stringify(sol_state *s) {
+    sol_val obj = sol_get(s, 0);
+    sol_val pretty = sol_get(s, 1);
+    sol_val commas = sol_get(s, 2);
+
+    if (!sol_isdtype(obj, SOL_DOBJ))
+        return sol_call_ex_err((sol_call_err){SOL_ERRV_TYPE_MISMATCH,
+            sf_str_fmt("Arg 'obj' expected obj, found '%s'", sol_typename(obj).c_str),
+        0});
+
+    return sol_call_ex_ok(sol_dnstr(s, _sol_stringify(
+        obj.dyn,
+        pretty.tt == SOL_TBOOL ? pretty.boolean : true,
+        commas.tt == SOL_TBOOL ? commas.boolean : false,
+        1
+    )));
 }
 
 sol_call_ex sol_std_err(sol_state *s) {
@@ -352,13 +420,14 @@ void sol_usestd(sol_state *state) {
     sol_dobj_set(io.dyn, sf_lit("print"), sol_wrapcfun(state, sol_std_print, 1, 0));
     sol_dobj_set(io.dyn, sf_lit("println"), sol_wrapcfun(state, sol_std_println, 1, 0));
     sol_dobj_set(io.dyn, sf_lit("time"), sol_wrapcfun(state, sol_std_time, 0, 0));
-    sol_dobj_set(io.dyn, sf_lit("fread"), sol_wrapcfun(state, sol_std_fread, 2, 0));
-    sol_dobj_set(io.dyn, sf_lit("fwrite"), sol_wrapcfun(state, sol_std_fread, 2, 0));
+    sol_dobj_set(io.dyn, sf_lit("fread"), sol_wrapcfun(state, sol_std_fread, 1, 0));
+    sol_dobj_set(io.dyn, sf_lit("fwrite"), sol_wrapcfun(state, sol_std_fwrite, 2, 0));
 
     sol_val obj = sol_dnew(state, SOL_DOBJ);
     sol_dobj_set(obj.dyn, sf_lit("new"), sol_wrapcfun(state, sol_std_new, 0, 0));
     sol_dobj_set(obj.dyn, sf_lit("set"), sol_wrapcfun(state, sol_std_set, 3, 0));
     sol_dobj_set(obj.dyn, sf_lit("get"), sol_wrapcfun(state, sol_std_get, 2, 0));
+    sol_dobj_set(obj.dyn, sf_lit("stringify"), sol_wrapcfun(state, sol_std_stringify, 3, 0));
 
     sol_val math = sol_dnew(state, SOL_DOBJ);
     sol_dobj_set(math.dyn, sf_lit("randi"), sol_wrapcfun(state, sol_std_randi, 2, 0));
@@ -377,6 +446,7 @@ void sol_usestd(sol_state *state) {
     sol_dobj_set(_g, sf_lit("type"), sol_wrapcfun(state, sol_std_type, 1, 0));
     sol_dobj_set(_g, sf_lit("eval"), sol_wrapcfun(state, sol_std_eval, 1, 0));
     sol_dobj_set(_g, sf_lit("import"), sol_wrapcfun(state, sol_std_import, 1, 0));
+    sol_dobj_set(_g, sf_lit("require"), sol_wrapcfun(state, sol_std_require, 1, 0));
     sol_dobj_set(_g, sf_lit("collect"), sol_wrapcfun(state, sol_std_collect, 0, 0));
 
     sol_dobj_set(_g, sf_lit("sol"), sol);

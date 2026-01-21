@@ -51,7 +51,6 @@ EXPORT sf_str sol_stackdump(sol_state *state);
 
 /// Create a new dynamic value
 EXPORT sol_val sol_dnew(sol_state *state, sol_dtype type);
-EXPORT sol_val sol_dcopy(sol_state *state, sol_val val);
 EXPORT void sol_dcollect(sol_state *state);
 /// Shorthand for using sol_dnew and assigning a string value.
 /// This function takes ownership of the string passed, so make a copy if needed
