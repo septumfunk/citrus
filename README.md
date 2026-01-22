@@ -5,7 +5,7 @@
 Instead of returning nil on operations that fail, you can return `err` types that include a panic string, that is printed when you call panic on them, or by converting an `err` to a string. Most language operations such as member accesses will also return `err`s on failure, so watch out for that.
 ```
 let exists = f.path;
-if type(exists) == "err" {
+if type(exists) == "err": {
   io.println(err);
 }
 exists = unwrap_or(exists, "test.txt");
@@ -32,20 +32,20 @@ let cat = {
     color = "Brown"
     babies = 0
 
-    give_birth = [cat]() {
-        cat.babies += 1;
-        io.println("A kitten is born! That's " + string(cat.babies) + " babies!");
+    give_birth = [self]() {
+        self.babies += 1;
+        io.println("A kitten is born! That's " + string(self.babies) + " babies!");
     }
 
-    describe = [cat]() {
-        io.println("My name is " + cat.name + ", my fav food is " + cat.fav_food +
-            ", and my color is " + cat.color + "!");
-        io.println("I've had " + string(cat.babies) + " babies so far.");
+    describe = [self]() {
+        io.println("My name is " + self.name + ", my fav food is " + self.fav_food +
+            ", and my color is " + self.color + "!");
+        io.println("I've had " + string(self.babies) + " babies so far.");
     }
 };
 
 let x = 0;
-while x < 3 {
+while x < 3: {
     cat.give_birth();
     x += 1;
 }
