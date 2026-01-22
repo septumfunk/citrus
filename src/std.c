@@ -176,6 +176,14 @@ sf_str _sol_stringify(sol_dobj *obj, bool pretty, bool commas, uint32_t id) {
     if (obj->pair_count == 0) return sf_lit("{}");
     sf_str out = sf_str_cdup(pretty ? "{\n" : "{ ");
     sol_dobj_foreach(obj, _sol_stringify_fe, &(_sol_stringify_args){&out, pretty, commas, id});
+
+    if (pretty && id) {
+        size_t s = sizeof(char) * (id-1) * 2;
+        char *idt = malloc(s + 1);
+        memset(idt, ' ', sizeof(char) * (id-1) * 2);
+        sf_str_append(&out, sf_ref(idt));
+        free(idt);
+    }
     sf_str_append(&out, sf_lit("}"));
     return out;
 }

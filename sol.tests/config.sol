@@ -9,7 +9,7 @@ let cfg = unwrap_or(do {
     if type(f) == "err": f
     else: eval(f)
 }, do {
-    unwrap(io.fwrite("test.cfg", obj.stringify(default)));
+    unwrap(io.fwrite("test.cfg", obj.stringify(default, false)));
     default
 });
 
