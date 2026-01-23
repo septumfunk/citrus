@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define SOL_VERSION "0.3"
+#define SOL_VERSION "0.5"
 #define SOL_GIT "https://github.com/septumfunk/solus"
 
 typedef enum {

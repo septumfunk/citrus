@@ -6,3 +6,5 @@ let mod = attempt(
     []() { return import("doesnt-exist.sol"); },
     [](err) { io.println(err); return {}; }
 );
+
+
